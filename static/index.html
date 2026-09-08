@@ -27,6 +27,8 @@
   .seg button{border:0;background:transparent;color:var(--muted);padding:8px 13px;font-size:13px;cursor:pointer}
   .seg button.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
   select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:13.5px}
+  .search{width:100%;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13.5px;margin:2px 0 8px}
+  .search::placeholder{color:var(--muted)}
 
   /* dual-thumb min/max grade slider */
   .filters{display:flex;flex-direction:column;gap:4px;margin:6px 0 2px}
@@ -40,6 +42,7 @@
 
   /* cards */
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin-top:12px}
+  .grid[hidden]{display:none}
   .card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;transition:transform .06s}
   .card:active{transform:scale(.98)}
   .card img{width:100%;display:block;background:var(--panel)}
@@ -48,17 +51,37 @@
   .meta{display:flex;gap:7px;flex-wrap:wrap}
   .tag{font-size:12px;color:var(--accent);font-weight:700}
   .wall{font-size:11.5px;color:var(--muted)}
+  .retired{font-size:10.5px;color:var(--muted);border:1px solid var(--dim);border-radius:6px;padding:1px 6px;text-transform:uppercase;letter-spacing:.03em}
   .desc{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .stars{color:var(--star);font-size:12px;letter-spacing:1px}
   .starcount{color:var(--muted);font-size:11px}
   .tickcount{color:var(--tick);font-size:11px}
+  .hotcount{color:var(--accent);font-size:11px}
   .badges{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}
   .empty{padding:48px 0;text-align:center;color:var(--muted);font-size:13.5px}
+
+  /* mine (personal logbook) */
+  .mine-stats{margin:12px 0 4px}
+  .mrow{font-size:13.5px;color:var(--text);margin-bottom:10px}
+  .pyr{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .pg{width:34px;font-size:12px;color:var(--muted);text-align:right;flex-shrink:0}
+  .pbar{flex:1;height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+  .pbar div{height:100%;background:var(--accent)}
+  .pc{width:20px;font-size:11.5px;color:var(--muted);text-align:right;flex-shrink:0}
+
+  /* leaderboard */
+  .board{margin-top:8px}
+  .board h3{font-size:14px;margin:16px 0 8px;color:var(--text)}
+  .board h3:first-child{margin-top:2px}
+  .brow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;background:var(--panel);border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:13.5px}
+  .brow .who{font-weight:600}
+  .brow .what{color:var(--muted);font-size:12.5px}
 
   /* sheet */
   .scrim{position:fixed;inset:0;background:rgba(8,10,13,.78);z-index:30;display:none}
   .scrim.open{display:block}
-  .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);max-height:94vh;overflow:auto;z-index:31;animation:rise .16s ease}
+  .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);max-height:94vh;overflow:auto;z-index:31;animation:rise .16s ease;display:none}
+  .sheet.open{display:block}
   @keyframes rise{from{transform:translateY(26px);opacity:.6}to{transform:translateY(0);opacity:1}}
   .sheet .wrap{padding:16px 0}
   .sheet img{width:100%;border-radius:10px;display:block;background:var(--panel)}
@@ -66,9 +89,14 @@
   .rg{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:4px}
   .rg span{font-size:13px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 10px}
   .rg span.g{color:#151008;background:var(--accent);border-color:var(--accent);font-weight:700}
+  .rg .retired{font-size:10.5px;padding:2px 8px;border-color:var(--dim);text-transform:uppercase;letter-spacing:.03em}
   .sheet h2{font-size:18px;letter-spacing:-.01em;margin-top:4px}
+  .consensus{font-size:12.5px;color:var(--muted);margin:2px 0 4px}
+  .consensus b{color:var(--text)}
   .dd{color:var(--muted);font-size:13.5px;line-height:1.5;margin-top:10px}
   .foot{color:var(--muted);font-size:12.5px;margin-top:12px}
+  .setterlink{color:inherit;font:inherit;background:none;border:0;padding:0;text-decoration:underline;text-decoration-color:var(--line);cursor:pointer}
+  .backbtn{display:block;margin-top:8px;background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 12px;font-size:12.5px;cursor:pointer}
 
   /* rating row */
   .rate{display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
@@ -85,6 +113,19 @@
   .tickmeta{color:var(--muted);font-size:12.5px}
   .tickgrade{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:13px;width:72px;text-transform:uppercase}
   .tickgrade.hidden{display:none}
+
+  /* comments */
+  .comments{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  .clist{display:flex;flex-direction:column;gap:9px;margin:9px 0}
+  .crow{font-size:13px;line-height:1.45}
+  .crow .cwho{color:var(--text);font-weight:600}
+  .crow .cwhen{color:var(--muted);font-size:11px;margin-left:5px}
+  .crow .cdel{color:var(--muted);background:none;border:0;cursor:pointer;font-size:11px;text-decoration:underline;margin-left:6px;padding:0}
+  .cempty{color:var(--muted);font-size:12.5px}
+  .cnew{display:flex;gap:8px;margin-top:6px}
+  .cinput{flex:1;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px}
+  .cpost{background:var(--accent);color:#151008;border:0;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0}
+  .commentcount{color:var(--muted);font-size:11px}
 </style>
 </head>
 <body>
@@ -94,22 +135,42 @@
 </header>
 
 <main class="wrap" id="main">
-  <div class="toolbar">
-    <div class="seg" id="sortseg">
-      <button data-sort="grade" class="on">Grade</button>
-      <button data-sort="new">New</button>
-    </div>
-    <select id="wall"><option value="">All walls</option></select>
+  <div class="seg" id="viewseg">
+    <button data-view="browse" class="on">Browse</button>
+    <button data-view="mine">Mine</button>
+    <button data-view="board">Leaderboard</button>
+    <button data-view="hot">🔥 Hot</button>
   </div>
 
-  <div class="filters">
-    <div class="gradelab"><span id="minLab">VB</span><span id="rangeLab" style="color:var(--text);font-weight:650"></span><span id="maxLab">V8+</span></div>
-    <div class="range-wrap">
-      <div class="rail"><div class="fill" id="dFill"></div></div>
-      <input type="range" id="min" min="0" max="1" value="0" step="1">
-      <input type="range" id="max" min="0" max="1" value="1" step="1">
+  <div id="browseControls">
+    <input type="search" id="search" class="search" placeholder="Search by name or setter…">
+
+    <div class="toolbar">
+      <div class="seg" id="sortseg">
+        <button data-sort="grade" class="on">Grade</button>
+        <button data-sort="new">New</button>
+      </div>
+      <div class="seg" id="statusseg">
+        <button data-status="active" class="on">On the wall</button>
+        <button data-status="all">All-time</button>
+      </div>
+      <select id="wall"><option value="">All walls</option></select>
+    </div>
+
+    <div class="filters">
+      <div class="gradelab"><span id="minLab">VB</span><span id="rangeLab" style="color:var(--text);font-weight:650"></span><span id="maxLab">V8+</span></div>
+      <div class="range-wrap">
+        <div class="rail"><div class="fill" id="dFill"></div></div>
+        <input type="range" id="min" min="0" max="1" value="0" step="1">
+        <input type="range" id="max" min="0" max="1" value="1" step="1">
+      </div>
     </div>
   </div>
+
+  <div class="mine-stats" id="mineStats" hidden></div>
+  <div class="mine-stats" id="hotStats" hidden></div>
+  <div class="mine-stats" id="setterStats" hidden></div>
+  <div class="board" id="board" hidden></div>
 
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden>No routes yet.</div>
@@ -120,7 +181,8 @@
   <div class="wrap">
     <img id="simg" alt="">
     <div class="sbody">
-      <div class="rg"><span class="g" id="sgrade"></span><span id="swall" hidden></span></div>
+      <div class="rg"><span class="g" id="sgrade"></span><span id="swall" hidden></span><span class="retired" id="sretired" hidden>Retired</span></div>
+      <div class="consensus" id="sconsensus" hidden></div>
       <h2 id="sname"></h2>
       <div class="dd" id="sdesc" hidden></div>
 
@@ -136,6 +198,15 @@
         <span class="tickmeta" id="sascent"></span>
       </div>
 
+      <div class="comments" id="scomments">
+        <span class="lab">Comments</span>
+        <div class="clist" id="clist"></div>
+        <div class="cnew">
+          <input id="cinput" class="cinput" placeholder="Add beta or a tip…" maxlength="500">
+          <button class="cpost" id="cpost">Post</button>
+        </div>
+      </div>
+
       <div class="foot" id="sfoot"></div>
     </div>
   </div>
@@ -143,7 +214,8 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const state={routes:[],sort:"grade",wall:"",min:0,max:1,grades:[],cur:null,initData:""};
+const state={routes:[],sort:"grade",wall:"",search:"",status:"active",min:0,max:1,grades:[],cur:null,initData:"",
+  view:"browse",curList:[],mine:null,board:null,hot:null,setter:null};
 
 (function tg(){
   if(window.Telegram&&window.Telegram.WebApp){
@@ -156,17 +228,29 @@ const state={routes:[],sort:"grade",wall:"",min:0,max:1,grades:[],cur:null,initD
 })();
 
 async function load(){
-  const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
-  const r=await fetch("/api/routes"+q).then(x=>x.json());
-  const k=await fetch("/api/meta").then(x=>x.json());
-  state.routes=r.routes; state.grades=["all",...k.grades];
-  const n=state.grades.length-1;
-  state.min=0; state.max=n;
-  $("#min").min=0; $("#min").max=n; $("#min").value=0;
-  $("#max").min=0; $("#max").max=n; $("#max").value=n;
-  setWallOptions(k.walls);
-  updateRangeUI();
-  paint();
+  $("#empty").hidden=true;
+  $("#sub").textContent="loading routes…";
+  try{
+    let q="?status="+state.status;
+    if(state.initData)q+="&tg="+encodeURIComponent(state.initData);
+    const r=await fetch("/api/routes"+q).then(x=>x.json());
+    const k=await fetch("/api/meta").then(x=>x.json());
+    state.routes=r.routes; state.grades=["all",...k.grades];
+    const n=state.grades.length-1;
+    state.min=0; state.max=n;
+    $("#min").min=0; $("#min").max=n; $("#min").value=0;
+    $("#max").min=0; $("#max").max=n; $("#max").value=n;
+    setWallOptions(k.walls);
+    updateRangeUI();
+    $("#sub").textContent="tap a card for details";
+    paint();
+  }catch(e){
+    $("#sub").textContent="tap a card for details";
+    const empty=$("#empty");
+    empty.hidden=false;
+    empty.innerHTML='Couldn\'t load routes. <a href="#" id="retry" style="color:var(--accent)">Retry</a>';
+    $("#retry").onclick=ev=>{ev.preventDefault();load()};
+  }
 }
 
 function setWallOptions(walls){
@@ -190,6 +274,10 @@ function fmtAvg(d){return d==null||d===0?"—":(Math.round(d*10)/10).toFixed(1)}
 function filtered(){
   let l=state.routes;
   if(state.wall)l=l.filter(r=>r.wall===state.wall);
+  if(state.search){
+    const q=state.search.trim().toLowerCase();
+    if(q)l=l.filter(r=>r.name.toLowerCase().includes(q)||(r.setter_name||"").toLowerCase().includes(q));
+  }
   const lo=state.min-1, hi=state.max-1;
   if(lo>=0)l=l.filter(r=>r.grade_low>=lo&&r.grade_low!==-1);
   if(hi<state.grades.length-2)l=l.filter(r=>r.grade_low<=hi);
@@ -199,26 +287,45 @@ function filtered(){
 }
 
 function paint(){
-  const list=filtered();
+  renderGrid(filtered());
+}
+
+function findRoutes(id){
+  // the same route can exist as separate object instances across
+  // state.routes (browse), state.mine.routes (personal logbook),
+  // state.hot.routes (this week's hot list) and state.setter.routes (a
+  // setter's profile) -- return every copy so a rating/tick updates
+  // whichever one is actually on screen
+  const out=state.routes.filter(x=>x.id===id);
+  if(state.mine)out.push(...state.mine.routes.filter(x=>x.id===id));
+  if(state.hot)out.push(...state.hot.routes.filter(x=>x.id===id));
+  if(state.setter)out.push(...state.setter.routes.filter(x=>x.id===id));
+  return out;
+}
+
+function renderGrid(list){
+  state.curList=list;
   $("#count").textContent=list.length+" route"+(list.length===1?"":"s");
   const grid=$("#grid"), empty=$("#empty");
   empty.hidden=!!list.length;
   grid.innerHTML=list.map(r=>`
     <div class="card" data-id="${r.id}">
-      <img loading="lazy" src="/api/photo/${r.id}" alt="">
+      <img loading="lazy" src="/api/photo/${r.id}" alt="" onerror="this.style.visibility='hidden'">
       <div class="info">
         <div class="nm"></div>
-        <div class="meta"><span class="tag">${esc(r.grade)}</span>${r.wall?`<span class="wall">· ${esc(r.wall)}</span>`:""}</div>
+        <div class="meta"><span class="tag">${esc(r.grade)}</span>${r.wall?`<span class="wall">· ${esc(r.wall)}</span>`:""}${r.retired_at?'<span class="retired">Retired</span>':""}</div>
         ${r.description?`<div class="desc">${esc(r.description)}</div>`:""}
         <div class="badges">
           ${stars(r.avg_rating)}<span class="starcount">${r.rating_count||""}</span>
           ${(r.tick_count||0)>0?`<span class="tickcount">✓ ${r.tick_count}</span>`:""}
+          ${r.recent_ticks?`<span class="hotcount">🔥 ${r.recent_ticks}</span>`:""}
+          ${(r.comment_count||0)>0?`<span class="commentcount">💬 ${r.comment_count}</span>`:""}
         </div>
       </div>
     </div>`).join("");
 
   grid.querySelectorAll(".card").forEach(c=>{
-    const r=state.routes.find(x=>x.id===Number(c.dataset.id));
+    const r=list.find(x=>x.id===Number(c.dataset.id));
     c.querySelector(".nm").textContent=r.name;
     c.onclick=e=>{if(e.target.closest("button"))return;open(r)};
   });
@@ -234,6 +341,177 @@ function updateRangeUI(){
   $("#dFill").style.width=(100-pL-pR)+"%";
 }
 
+/* ---- view switching: Browse / Mine / Leaderboard ---- */
+function setView(v){
+  if(v===state.view)return;
+  state.view=v;
+  $("#viewseg").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
+  $("#browseControls").hidden=v!=="browse";
+  $("#mineStats").hidden=v!=="mine";
+  $("#hotStats").hidden=v!=="hot";
+  $("#setterStats").hidden=true;
+  $("#board").hidden=v!=="board";
+  $("#grid").hidden=v==="board";
+  $("#empty").hidden=true;
+  if(v==="browse"){
+    $("#empty").textContent="No routes yet.";
+    $("#count").textContent="";
+    paint();
+  }else if(v==="mine"){
+    loadMine();
+  }else if(v==="board"){
+    $("#count").textContent="";
+    loadBoard();
+  }else if(v==="hot"){
+    loadHot();
+  }
+}
+
+async function loadMine(){
+  if(!state.initData){
+    $("#grid").innerHTML="";
+    $("#empty").hidden=false;
+    $("#empty").textContent="Open via Telegram to see your send history.";
+    $("#count").textContent="";
+    return;
+  }
+  $("#sub").textContent="loading your ticks…";
+  try{
+    state.mine=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
+    $("#sub").textContent="tap a card for details";
+    renderMine();
+  }catch(e){
+    $("#sub").textContent="tap a card for details";
+    $("#grid").innerHTML="";
+    $("#empty").hidden=false;
+    $("#empty").textContent="Couldn't load your ticks. Try again shortly.";
+  }
+}
+
+function renderMine(){
+  const m=state.mine;
+  if(!m)return;
+  const bars=Object.entries(m.grade_pyramid||{})
+    .sort((a,b)=>state.grades.indexOf(b[0])-state.grades.indexOf(a[0]));
+  const max=Math.max(1,...bars.map(b=>b[1]));
+  $("#mineStats").innerHTML=m.count
+    ?`<div class="mrow"><b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></div>`+
+      bars.map(([g,c])=>`<div class="pyr"><span class="pg">${esc(g)}</span><div class="pbar"><div style="width:${c/max*100}%"></div></div><span class="pc">${c}</span></div>`).join("")
+    :"";
+  $("#count").textContent="";
+  $("#empty").textContent="No ticks yet — open a route and mark it sent.";
+  renderGrid(m.routes);
+}
+
+async function loadHot(){
+  $("#sub").textContent="loading this week's hot routes…";
+  try{
+    let q="/api/hot";
+    if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
+    state.hot=await fetch(q).then(x=>x.json());
+    $("#sub").textContent="tap a card for details";
+    renderHot();
+  }catch(e){
+    $("#sub").textContent="tap a card for details";
+    $("#grid").innerHTML="";
+    $("#empty").hidden=false;
+    $("#empty").textContent="Couldn't load this week's hot routes. Try again shortly.";
+  }
+}
+
+function renderHot(){
+  const h=state.hot;
+  if(!h)return;
+  const top=h.routes[0];
+  $("#hotStats").innerHTML=top
+    ?`<div class="mrow">🔥 <b>${esc(top.name)}</b> is the route of the week — `+
+      `${top.recent_ticks} send${top.recent_ticks===1?"":"s"} in the last ${h.days} days</div>`
+    :"";
+  $("#count").textContent="";
+  $("#empty").textContent="No sends yet this week — be the first!";
+  renderGrid(h.routes);
+}
+
+/* ---- setter profile (drill-down from a route's "set by" link) ---- */
+async function openSetter(setterId){
+  if(!setterId)return;
+  closeSheet();
+  state.view="setter";
+  $("#viewseg").querySelectorAll("button").forEach(b=>b.classList.remove("on"));
+  $("#browseControls").hidden=true;
+  $("#mineStats").hidden=true;
+  $("#hotStats").hidden=true;
+  $("#board").hidden=true;
+  $("#grid").hidden=false;
+  $("#empty").hidden=true;
+  $("#setterStats").hidden=false;
+  $("#setterStats").innerHTML='<div class="empty">loading…</div>';
+  $("#sub").textContent="loading setter…";
+  try{
+    let q="/api/setter/"+setterId;
+    if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
+    state.setter=await fetch(q).then(x=>x.json());
+    $("#sub").textContent="tap a card for details";
+    renderSetter();
+  }catch(e){
+    $("#sub").textContent="tap a card for details";
+    $("#setterStats").innerHTML='<div class="empty">Couldn\'t load this setter.</div>';
+  }
+}
+
+function renderSetter(){
+  const p=state.setter;
+  if(!p)return;
+  if(p.detail){
+    // FastAPI's default 404 body ({"detail": "..."}) -- setter not found
+    $("#setterStats").innerHTML='<div class="empty">Setter not found.</div>'+
+      '<button class="backbtn" id="setterBack">← Back to Browse</button>';
+    $("#setterBack").onclick=()=>setView("browse");
+    $("#count").textContent="";
+    $("#grid").innerHTML="";
+    $("#empty").hidden=true;
+    return;
+  }
+  const avg=p.avg_rating_received!=null
+    ?`${fmtAvg(p.avg_rating_received)} ★ avg (${p.rating_count})`
+    :"no ratings yet";
+  const most=p.most_ticked_route
+    ?`<div class="mrow">Most sent: <b>${esc(p.most_ticked_route.name)}</b> (${p.most_ticked_route.tick_count})</div>`
+    :"";
+  $("#setterStats").innerHTML=
+    `<div class="mrow"><b>${esc(p.setter_name||"Setter")}</b> · ${p.routes_set} route${p.routes_set===1?"":"s"} set `+
+    `(${p.active} active, ${p.retired} retired) · ${avg}</div>`+
+    most+
+    `<button class="backbtn" id="setterBack">← Back to Browse</button>`;
+  $("#setterBack").onclick=()=>setView("browse");
+  $("#count").textContent="";
+  $("#empty").textContent="This setter has no routes.";
+  renderGrid(p.routes);
+}
+
+async function loadBoard(){
+  $("#board").innerHTML='<div class="empty">loading…</div>';
+  try{
+    state.board=await fetch("/api/leaderboard").then(x=>x.json());
+    renderBoard();
+  }catch(e){
+    $("#board").innerHTML='<div class="empty">Couldn\'t load the leaderboard.</div>';
+  }
+}
+
+function renderBoard(){
+  const b=state.board;
+  if(!b)return;
+  const medal=i=>["🥇","🥈","🥉"][i]||(i+1)+".";
+  const climbers=b.climbers.length
+    ?b.climbers.map((c,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(c.tg_user_name||"climber")}</span><span class="what">${c.ticks} sends · ${esc(c.hardest_grade||"—")}</span></div>`).join("")
+    :'<div class="empty">No ticks yet.</div>';
+  const setters=b.setters.length
+    ?b.setters.map((s,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(s.setter_name||"setter")}</span><span class="what">${s.routes_set} routes set</span></div>`).join("")
+    :'<div class="empty">No routes set yet.</div>';
+  $("#board").innerHTML=`<h3>🏆 Top climbers</h3>${climbers}<h3>🔨 Top setters</h3>${setters}`;
+}
+
 /* ---- sheet buttons ---- */
 async function rate(id,val){
   if(!state.initData){alert("Open via Telegram to rate (one rating per account).");return}
@@ -241,11 +519,10 @@ async function rate(id,val){
     const res=await fetch(`/api/rate/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json();
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
-    const r=state.routes.find(x=>x.id===id);
-    if(r&&d.avg!==undefined){r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating}
-    paint();
+    if(d.avg!==undefined)findRoutes(id).forEach(r=>{r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating});
+    renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
-  }catch(e){}
+  }catch(e){alert("Couldn't save your rating. Check your connection and try again.")}
 }
 
 async function tick(id,val){
@@ -254,11 +531,10 @@ async function tick(id,val){
     const res=await fetch(`/api/tick/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json();
     if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
-    const r=state.routes.find(x=>x.id===id);
-    if(r&&d.ticked!==undefined){r.my_tick=d.ticked?1:0;r.tick_count=d.count}
-    paint();
+    if(d.ticked!==undefined)findRoutes(id).forEach(r=>{r.my_tick=d.ticked?1:0;r.tick_count=d.count});
+    renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
-  }catch(e){}
+  }catch(e){alert("Couldn't save your tick. Check your connection and try again.")}
 }
 
 async function setTickGrade(id){
@@ -266,8 +542,7 @@ async function setTickGrade(id){
   if(!g||!state.initData)return;
   try{
     await fetch(`/api/tick/${id}/grade`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggested_grade:g,init_data:state.initData})});
-    const r=state.routes.find(x=>x.id===id);
-    if(r)r.my_suggested_grade=g;
+    findRoutes(id).forEach(r=>r.my_suggested_grade=g);
   }catch(e){}
 }
 
@@ -276,6 +551,14 @@ function refreshSheet(){
   const r=state.cur; if(!r)return;
   $("#sgrade").textContent=r.grade;
   const w=$("#swall"); w.hidden=!r.wall; w.textContent="🧗 "+r.wall;
+  $("#sretired").hidden=!r.retired_at;
+  const cons=$("#sconsensus");
+  if(r.consensus_grade&&r.consensus_count>0){
+    cons.hidden=false;
+    cons.innerHTML=`Community grade: <b>${esc(r.consensus_grade)}</b> · ${r.consensus_count} suggestion${r.consensus_count===1?"":"s"}`;
+  }else{
+    cons.hidden=true;
+  }
   $("#sname").textContent=r.name;
   const dd=$("#sdesc"); dd.hidden=!r.description; dd.textContent=r.description;
   $("#savg").textContent=`${fmtAvg(r.avg_rating)} ★ · ${r.rating_count||0} ratings`;
@@ -295,26 +578,125 @@ function refreshSheet(){
   }
   const n=r.tick_count||0;
   $("#sascent").textContent=n+(n===1?" ascent":" ascents");
-  $("#sfoot").textContent=((r.setter_name?"set by "+r.setter_name:"")+" · "+fmtDate(r.created_at));
+  const foot=$("#sfoot");
+  foot.innerHTML="";
+  if(r.setter_name){
+    const btn=document.createElement("button");
+    btn.className="setterlink";
+    btn.textContent="set by "+r.setter_name;
+    btn.onclick=()=>openSetter(r.setter_id);
+    foot.appendChild(btn);
+    foot.appendChild(document.createTextNode(" · "+fmtDate(r.created_at)));
+  }else{
+    foot.textContent=fmtDate(r.created_at);
+  }
 }
 function open(r){
   state.cur=r;
   $("#simg").src=`/api/photo/${r.id}`;
   refreshSheet();
+  $("#cinput").value="";
+  loadComments(r.id);
   $("#scrim").classList.add("open");
+  $("#sheet").classList.add("open");
+}
+
+/* ---- comments ---- */
+async function loadComments(routeId){
+  const list=$("#clist");
+  list.innerHTML='<div class="cempty">loading…</div>';
+  try{
+    let q="/api/comments/"+routeId;
+    if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
+    const d=await fetch(q).then(x=>x.json());
+    if(state.cur&&state.cur.id===routeId)renderComments(routeId,d.comments);
+  }catch(e){
+    if(state.cur&&state.cur.id===routeId)list.innerHTML='<div class="cempty">Couldn\'t load comments.</div>';
+  }
+}
+
+function renderComments(routeId,comments){
+  const list=$("#clist");
+  if(!comments.length){
+    list.innerHTML='<div class="cempty">No comments yet — add some beta.</div>';
+    return;
+  }
+  list.innerHTML="";
+  comments.forEach(c=>{
+    const row=document.createElement("div");
+    row.className="crow";
+    const who=document.createElement("span");
+    who.className="cwho";
+    who.textContent=(c.tg_user_name||"climber")+": ";
+    row.appendChild(who);
+    row.appendChild(document.createTextNode(c.text));
+    const when=document.createElement("span");
+    when.className="cwhen";
+    when.textContent=fmtDate(c.created_at);
+    row.appendChild(when);
+    if(c.is_mine){
+      const del=document.createElement("button");
+      del.className="cdel";
+      del.textContent="delete";
+      del.onclick=()=>deleteComment(c.id,routeId);
+      row.appendChild(del);
+    }
+    list.appendChild(row);
+  });
+}
+
+function bumpCommentCount(routeId,delta){
+  findRoutes(routeId).forEach(r=>{r.comment_count=Math.max(0,(r.comment_count||0)+delta)});
+  renderGrid(state.curList);
+}
+
+async function postComment(routeId){
+  const input=$("#cinput");
+  const text=input.value.trim();
+  if(!text)return;
+  if(!state.initData){alert("Open via Telegram to comment.");return}
+  try{
+    const res=await fetch(`/api/comments/${routeId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,init_data:state.initData})});
+    const d=await res.json();
+    if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
+    if(!res.ok){alert(d.error||"Couldn't post that comment.");return}
+    input.value="";
+    bumpCommentCount(routeId,1);
+    loadComments(routeId);
+  }catch(e){alert("Couldn't post your comment. Check your connection and try again.")}
+}
+
+async function deleteComment(commentId,routeId){
+  try{
+    await fetch(`/api/comments/${commentId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
+    bumpCommentCount(routeId,-1);
+    loadComments(routeId);
+  }catch(e){alert("Couldn't delete your comment. Check your connection and try again.")}
+}
+function closeSheet(){
+  $("#scrim").classList.remove("open");
+  $("#sheet").classList.remove("open");
 }
 
 function fmtDate(d){try{const dt=new Date(d.replace(" ","T")+"Z");return dt.toLocaleDateString(undefined,{day:"numeric",month:"short"})}catch(e){return d}}
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 
 /* ---- wire up ---- */
-$("#scrim").onclick=()=>$("#scrim").classList.remove("open");
+$("#scrim").onclick=closeSheet;
+$("#viewseg").querySelectorAll("button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
 $("#sortseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   state.sort=b.dataset.sort;
   $("#sortseg").querySelectorAll("button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
   paint();
 });
+$("#statusseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  if(b.dataset.status===state.status)return;
+  state.status=b.dataset.status;
+  $("#statusseg").querySelectorAll("button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
+  load();
+});
 $("#wall").onchange=e=>{state.wall=e.target.value;paint()};
+$("#search").oninput=e=>{state.search=e.target.value;paint()};
 $("#min").oninput=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI()};
 $("#min").onchange=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI();paint()};
 $("#max").oninput=e=>{let v=+e.target.value;if(v<state.min)v=state.min;state.max=v;e.target.value=v;updateRangeUI()};
@@ -331,6 +713,8 @@ $("#starselect").onclick=e=>{
 $("#stck").onclick=()=>state.cur&&tick(state.cur.id,1);
 $("#stckgrade").onchange=()=>state.cur&&setTickGrade(state.cur.id);
 $("#stckgrade").onkeyup=e=>{if(e.key==="Enter"){state.cur&&setTickGrade(state.cur.id);e.target.blur()}};
+$("#cpost").onclick=()=>state.cur&&postComment(state.cur.id);
+$("#cinput").onkeyup=e=>{if(e.key==="Enter"){state.cur&&postComment(state.cur.id);e.target.blur()}};
 
 load();
 </script>

@@ -6,12 +6,15 @@ confirmation linking to the mini-app. Provides admin CRUD (edit/delete/override)
 
 Runs as a systemd service (see route-archiver.service). No cron, no Hermes.
 """
+import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import Forbidden
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -21,7 +24,7 @@ from telegram.ext import (
     filters,
 )
 
-from storage import GradeError, Storage, _norm_wall, parse_caption
+from storage import GradeError, Storage, V_ORDER, WILD_LOW, _norm_wall, _V_IDX, parse_caption
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("routes-bot")
@@ -61,10 +64,27 @@ def _is_admin(uid) -> bool:
     return uid in ADMINS
 
 
+_MD_SPECIAL = re.compile(r"([_*`\[])")
+
+
+def _md_escape(s) -> str:
+    """Escape legacy-Markdown special chars in free-form user text.
+
+    Route names, walls, descriptions and setter names all come from
+    Telegram captions / display names we don't control; an unbalanced
+    `_`/`*`/`` ` ``/`[` in any of them makes parse_mode="Markdown" reject
+    the whole message, so escape before interpolating into any Markdown
+    message.
+    """
+    if not s:
+        return ""
+    return _MD_SPECIAL.sub(r"\\\1", str(s))
+
+
 def _route_line(r: dict) -> str:
-    wall = f" · {r['wall']}" if r.get("wall") else ""
-    setter = f" by {r['setter_name']}" if r.get("setter_name") else ""
-    return f"🧗 *{r['name']}* — {r['grade']}{wall}{setter}"
+    wall = f" · {_md_escape(r['wall'])}" if r.get("wall") else ""
+    setter = f" by {_md_escape(r['setter_name'])}" if r.get("setter_name") else ""
+    return f"🧗 *{_md_escape(r['name'])}* — {r['grade']}{wall}{setter}"
 
 
 def _app_link(r: dict) -> InlineKeyboardMarkup:
@@ -77,6 +97,35 @@ def _app_link(r: dict) -> InlineKeyboardMarkup:
     """
     kb = [[InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)]]
     return InlineKeyboardMarkup(kb)
+
+
+# canonical wall arg parsing, shared by /wall and /reset
+_WALL_ARG_CANON = {"left": "Left", "middle": "Middle", "right": "Right",
+                    "l": "Left", "m": "Middle", "r": "Right"}
+
+
+def _canon_wall_arg(raw: str):
+    return _WALL_ARG_CANON.get(raw.strip().lower())
+
+
+def _route_admin_buttons(route: dict) -> InlineKeyboardMarkup:
+    """Edit/Delete/Retire quick actions attached to a route's message.
+
+    These stay live on the original message indefinitely (Telegram
+    callback_data is just re-looked-up against the DB, no in-memory
+    session), so an admin can scroll back and retire/delete a route weeks
+    after it was posted.
+    """
+    retire_label = "♻️ Restore" if route.get("retired_at") else "🪨 Retire"
+    rows = [
+        [
+            InlineKeyboardButton("✏️ Edit", callback_data=f"edit:{route['id']}"),
+            InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route['id']}"),
+        ],
+        [InlineKeyboardButton(retire_label, callback_data=f"retire:{route['id']}")],
+        [InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)],
+    ]
+    return InlineKeyboardMarkup(rows)
 
 
 async def _topic_wall(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, thread_id: int):
@@ -102,7 +151,6 @@ TOPIC_WALLS_FILE = BASE_DIR / "data" / "topic_walls.json"
 
 
 def _load_json(path):
-    import json
     try:
         return json.loads(path.read_text())
     except Exception:
@@ -110,7 +158,6 @@ def _load_json(path):
 
 
 def _save_json(path, data):
-    import json
     try:
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(data))
@@ -130,16 +177,9 @@ def _topic_wall_map(chat_id: int, thread_id: int):
 def _remember_topic(chat_id: int, thread_id: int, name: str):
     if not name or not thread_id:
         return
-    import json
-    try:
-        data = json.loads(TOPIC_NAMES_FILE.read_text()) if TOPIC_NAMES_FILE.exists() else {}
-    except Exception:
-        data = {}
+    data = _load_json(TOPIC_NAMES_FILE)
     data.setdefault(str(chat_id), {})[str(thread_id)] = name
-    try:
-        TOPIC_NAMES_FILE.write_text(json.dumps(data))
-    except Exception as e:
-        log.warning("couldn't save topic name: %s", e)
+    _save_json(TOPIC_NAMES_FILE, data)
 
 
 # --------------------------------------------------------------------------- #
@@ -153,6 +193,9 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     # ignore the bot's own reposts (avoid reply loops)
     if update.effective_user and update.effective_user.id == ctx.bot.id:
+        return
+    # only archive from the configured group, if one is set
+    if CHAT_ID and msg.chat.id != CHAT_ID:
         return
 
     caption = msg.caption or ""
@@ -178,7 +221,6 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     photo = msg.photo[-1]
     fid = photo.file_id
     afile = await ctx.bot.get_file(fid)
-    route_id = None
     suffix = Path(afile.file_path or "").suffix or ".jpg"
     dest = PHOTO_DIR / f"{fid}{suffix}"
     try:
@@ -204,27 +246,20 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         setter_name=setter_name,
         setter_id=setter_id,
     )
-    route_id = route["id"]
-
     # admin quick actions on the confirmation
-    buttons = [
-        [
-            InlineKeyboardButton("✏️ Edit", callback_data=f"edit:{route_id}"),
-            InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route_id}"),
-        ]
-    ]
-    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)]])
+    kb = _route_admin_buttons(route)
 
-    desc = f"\n📝 {route['description']}" if route.get("description") else ""
+    desc = f"\n📝 {_md_escape(route['description'])}" if route.get("description") else ""
     await msg.reply_text(
-        f"✅ Archived *{route['name']}* — {route['grade']}"
-        + (f" · {route['wall']}" if route.get("wall") else "")
+        f"✅ Archived *{_md_escape(route['name'])}* — {route['grade']}"
+        + (f" · {_md_escape(route['wall'])}" if route.get("wall") else "")
         + desc
-        + (f"\n🧗 Set by {route['setter_name']}" if route.get("setter_name") else "")
+        + (f"\n🧗 Set by {_md_escape(route['setter_name'])}" if route.get("setter_name") else "")
         + "\nTap to open the full collection.",
         parse_mode="Markdown",
         reply_markup=kb,
     )
+    await _notify_subscribers(ctx, route, wall)
 
 
 async def on_topic_event(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -255,6 +290,13 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "`Crack Line V4`\n"
         "Post it in the topic for its wall (left / overhang / slab) and I'll\n"
         "tag the wall automatically.\n\n"
+        "/mine — your own send history\n"
+        "/leaderboard — top climbers & setters\n"
+        "/hot — what's hot this week\n"
+        "/setter <name> — a setter's profile\n"
+        "/search <name or setter> — find a route\n"
+        "/notify [grade] [wall] — DM me new routes matching your taste "
+        "(only works in a private chat with me, not here)\n\n"
         "Tap for the full collection.",
         parse_mode="Markdown",
         reply_markup=_app_link({}),
@@ -282,7 +324,211 @@ async def cmd_routes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(_route_line(r))
     if len(routes) > 30:
         lines.append(f"\n…and {len(routes)-30} more. Open the collection for all.")
+    stats = storage.stats()
+    lines.append(f"\n_{stats['active']} active · {stats['retired']} retired all-time_")
     await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Search active routes by name or setter: /search <query>."""
+    args = ctx.args or []
+    if not args:
+        await update.effective_message.reply_text("Usage: /search <name or setter>")
+        return
+    query = " ".join(args)
+    routes = storage.list_routes(search=query)
+    if not routes:
+        await update.effective_message.reply_text(f"No routes matching {query!r}.")
+        return
+    lines = [f"*{len(routes)} match" + ("" if len(routes) == 1 else "es")
+             + f'* for "{_md_escape(query)}"']
+    for r in routes[:30]:
+        lines.append(_route_line(r))
+    if len(routes) > 30:
+        lines.append(f"\n…and {len(routes) - 30} more. Open the collection for all.")
+    await update.effective_message.reply_text(
+        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
+    )
+
+
+def _hardest(routes: list[dict]):
+    """(grade, grade_low) of the hardest route in a list, ignoring
+    wildcard-graded ones. None if there's nothing gradeable."""
+    hardest_grade, hardest_low = None, WILD_LOW
+    for r in routes:
+        if r["grade_low"] > hardest_low:
+            hardest_low, hardest_grade = r["grade_low"], r["grade"]
+    return hardest_grade
+
+
+async def cmd_mine(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Your own send history: /mine."""
+    user = update.effective_user
+    if not user:
+        return
+    routes = storage.user_ticked_routes(user.id)
+    if not routes:
+        await update.effective_message.reply_text(
+            "No ticks yet — open a route in the collection and mark it sent.",
+            reply_markup=_app_link({}),
+        )
+        return
+    hardest = _hardest(routes)
+    lines = [f"*{len(routes)} sends* · hardest {hardest}"]
+    for r in routes[:20]:
+        suffix = " _(retired)_" if r.get("retired_at") else ""
+        lines.append(_route_line(r) + suffix)
+    if len(routes) > 20:
+        lines.append(f"\n…and {len(routes)-20} more. Open the collection for your full list.")
+    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+_MEDALS = ["🥇", "🥈", "🥉"]
+
+
+async def cmd_leaderboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Top climbers (sends + hardest grade) and top setters: /leaderboard."""
+    climbers = storage.leaderboard_climbers(10)
+    setters = storage.leaderboard_setters(10)
+
+    lines = ["🏆 *Top climbers*"]
+    if not climbers:
+        lines.append("No ticks yet.")
+    for i, c in enumerate(climbers):
+        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
+        name = _md_escape(c["tg_user_name"] or f"user_{c['tg_user_id']}")
+        lines.append(f"{rank} {name} — {c['ticks']} sends · hardest {c['hardest_grade']}")
+
+    lines.append("\n🔨 *Top setters*")
+    if not setters:
+        lines.append("No routes set yet.")
+    for i, s in enumerate(setters):
+        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
+        name = _md_escape(s["setter_name"] or f"setter_{s['setter_id']}")
+        lines.append(f"{rank} {name} — {s['routes_set']} routes set")
+
+    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_hot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """What's hot this week -- routes with the most ticks in the last 7
+    days, rank #1 being the de facto "route of the week": /hot."""
+    routes = storage.hot_routes(days=7, limit=10)
+    if not routes:
+        await update.effective_message.reply_text(
+            "No sends yet this week — be the first!", reply_markup=_app_link({})
+        )
+        return
+    lines = ["🔥 *Hot this week*"]
+    for i, r in enumerate(routes):
+        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
+        n = r["recent_ticks"]
+        lines.append(f"{rank} {_route_line(r)} — {n} send{'' if n == 1 else 's'} this week")
+    await update.effective_message.reply_text(
+        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
+    )
+
+
+async def cmd_setter(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """A setter's own profile by name: /setter <name>."""
+    args = ctx.args or []
+    if not args:
+        await update.effective_message.reply_text("Usage: /setter <name>")
+        return
+    name = " ".join(args)
+    setter_id = storage.find_setter_id(name)
+    if setter_id is None:
+        await update.effective_message.reply_text(f"No setter matching {name!r}.")
+        return
+    profile = storage.setter_profile(setter_id)
+    lines = [
+        f"🔨 *{_md_escape(profile['setter_name'])}*",
+        f"{profile['routes_set']} routes set · {profile['active']} active · {profile['retired']} retired",
+    ]
+    for r in profile["routes"][:15]:
+        lines.append(_route_line(r))
+    if len(profile["routes"]) > 15:
+        lines.append(f"\n…and {len(profile['routes']) - 15} more. Open the collection for all.")
+    await update.effective_message.reply_text(
+        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
+    )
+
+
+async def cmd_notify(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Get a DM when a new route matching your preferences is archived:
+    /notify [grade] [wall] | off (no args shows your current status).
+
+    Only works as a private message to the bot -- Telegram never lets a
+    bot message someone who hasn't spoken to it first, so there's no way
+    to set this up from inside the group.
+    """
+    chat = update.effective_chat
+    user = update.effective_user
+    if not user or not chat:
+        return
+    if chat.type != "private":
+        await update.effective_message.reply_text(
+            "DM me and run /notify there — I can only message you later if "
+            "you've started a private chat with me first."
+        )
+        return
+
+    args = ctx.args or []
+    if not args:
+        sub = storage.get_subscription(user.id)
+        if not sub:
+            await update.effective_message.reply_text(
+                "You're not subscribed. /notify V4 left for new V4+ routes "
+                "on the left wall, or just /notify for everything."
+            )
+            return
+        grade = V_ORDER[sub["min_grade_low"]] + "+" if sub["min_grade_low"] is not None else "any grade"
+        wall = sub["wall"] or "any wall"
+        await update.effective_message.reply_text(
+            f"You're subscribed: {grade} on {wall}. /notify off to stop."
+        )
+        return
+
+    if args[0].lower() == "off":
+        storage.unsubscribe(user.id)
+        await update.effective_message.reply_text("Unsubscribed.")
+        return
+
+    min_grade_low, wall = None, None
+    for a in args:
+        if a.upper() in _V_IDX:
+            min_grade_low = _V_IDX[a.upper()]
+        else:
+            canon = _canon_wall_arg(a)
+            if canon:
+                wall = canon
+    storage.subscribe(user.id, chat.id, min_grade_low=min_grade_low, wall=wall)
+    grade_label = V_ORDER[min_grade_low] + "+" if min_grade_low is not None else "any grade"
+    wall_label = wall or "any wall"
+    await update.effective_message.reply_text(
+        f"✅ Subscribed: {grade_label} on {wall_label}. /notify off to stop."
+    )
+
+
+async def _notify_subscribers(ctx: ContextTypes.DEFAULT_TYPE, route: dict, wall):
+    """DM everyone whose /notify preferences match a newly-archived
+    route. Best-effort: a user who has blocked the bot gets silently
+    unsubscribed instead of failing the archive flow."""
+    subs = storage.matching_subscribers(route["grade_low"], wall)
+    if not subs:
+        return
+    text = (
+        f"🔔 New route matching your alert: *{_md_escape(route['name'])}* — {route['grade']}"
+        + (f" · {_md_escape(wall)}" if wall else "")
+        + "\n/notify off to stop these."
+    )
+    for sub in subs:
+        try:
+            await ctx.bot.send_message(sub["tg_chat_id"], text, parse_mode="Markdown")
+        except Forbidden:
+            storage.unsubscribe(sub["tg_user_id"])
+        except Exception as e:
+            log.warning("notify failed for %s: %s", sub["tg_user_id"], e)
 
 
 # --------------------------------------------------------------------------- #
@@ -315,8 +561,7 @@ async def cmd_wall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Usage: /wall left | middle | right")
         return
     raw = " ".join(args).strip().lower()
-    canon = {"left": "Left", "middle": "Middle", "right": "Right",
-             "l": "Left", "m": "Middle", "r": "Right"}.get(raw)
+    canon = _canon_wall_arg(raw)
     if not canon:
         await update.effective_message.reply_text("Wall must be left, middle or right.")
         return
@@ -324,6 +569,49 @@ async def cmd_wall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data.setdefault(str(chat.id), {})[str(thread_id)] = canon
     _save_json(TOPIC_WALLS_FILE, data)
     await update.effective_message.reply_text(f"✅ Topic -> *{canon}* wall. Photos here will tag {canon}.", parse_mode="Markdown")
+
+
+async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Bulk-retire every active route on a wall (or the whole gym):
+    /reset left | middle | right | all.
+
+    Mirrors a physical wall reset -- when a section gets stripped, every
+    route on it comes down at once. Confirms first since it can affect
+    many routes in one shot; retiring (unlike delete) is reversible one
+    route at a time via the 🪨/♻️ button on each route's message.
+    """
+    user = update.effective_user
+    if not user or not _is_admin(user.id):
+        await update.effective_message.reply_text("⛔ admins only.")
+        return
+    args = ctx.args or []
+    if not args:
+        await update.effective_message.reply_text("Usage: /reset left | middle | right | all")
+        return
+    raw = " ".join(args).strip().lower()
+    if raw == "all":
+        wall, label = None, "all walls"
+    else:
+        wall = _canon_wall_arg(raw)
+        if not wall:
+            await update.effective_message.reply_text("Wall must be left, middle, right, or all.")
+            return
+        label = wall
+
+    count = storage.count_active_routes(wall)
+    if count == 0:
+        await update.effective_message.reply_text(f"No active routes on {label} to retire.")
+        return
+
+    token = "ALL" if wall is None else wall
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Yes, retire them", callback_data=f"reset_yes:{token}"),
+        InlineKeyboardButton("Cancel", callback_data=f"reset_no:{token}"),
+    ]])
+    await update.effective_message.reply_text(
+        f"Retire {count} active route{'' if count == 1 else 's'} on *{_md_escape(label)}*?",
+        parse_mode="Markdown", reply_markup=kb,
+    )
 
 
 async def cmd_setchat(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -335,7 +623,6 @@ async def cmd_setchat(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # record chat + group name in a small config file for /chat
     cfg = BASE_DIR / "data" / "chat.json"
     cfg.parent.mkdir(exist_ok=True)
-    import json
     data = {"chat_id": chat.id, "title": getattr(chat, "title", None)}
     cfg.write_text(json.dumps(data))
     await update.effective_message.reply_text(
@@ -353,13 +640,33 @@ async def _delete_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_
         InlineKeyboardButton("Cancel", callback_data=f"del_no:{route_id}"),
     ]])
     await update.callback_query.edit_message_text(
-        f"Delete *{route['name']}* ({route['grade']})?", parse_mode="Markdown", reply_markup=kb
+        f"Delete *{_md_escape(route['name'])}* ({route['grade']})?",
+        parse_mode="Markdown", reply_markup=kb
     )
 
 
 async def _do_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_id):
     storage.delete_route(route_id)
     await update.callback_query.edit_message_text("🗑 Deleted.")
+
+
+async def _toggle_retire(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_id):
+    route = storage.get_route(route_id)
+    if not route:
+        await update.callback_query.answer("Not found.")
+        return
+    if route.get("retired_at"):
+        route = storage.unretire_route(route_id)
+        await update.callback_query.answer("Restored to active.")
+    else:
+        route = storage.retire_route(route_id)
+        await update.callback_query.answer("Retired.")
+    try:
+        await update.callback_query.edit_message_reply_markup(
+            reply_markup=_route_admin_buttons(route)
+        )
+    except Exception as e:
+        log.warning("couldn't refresh retire button: %s", e)
 
 
 async def _edit_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_id):
@@ -403,8 +710,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     ctx.user_data.pop("editing_route", None)
     await update.effective_message.reply_text(
-        f"✅ Updated to *{r['name']}* — {r['grade']}"
-        + (f" · {r['wall']}" if r.get("wall") else ""),
+        f"✅ Updated to *{_md_escape(r['name'])}* — {r['grade']}"
+        + (f" · {_md_escape(r['wall'])}" if r.get("wall") else ""),
         parse_mode="Markdown",
     )
 
@@ -425,6 +732,16 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Cancelled.")
     elif data.startswith("edit:"):
         await _edit_flow(update, ctx, int(data.split(":")[1]))
+    elif data.startswith("retire:"):
+        await _toggle_retire(update, ctx, int(data.split(":")[1]))
+    elif data.startswith("reset_yes:"):
+        token = data.split(":", 1)[1]
+        wall = None if token == "ALL" else token
+        n = storage.retire_wall(wall)
+        label = "all walls" if wall is None else wall
+        await q.edit_message_text(f"✅ Retired {n} route{'' if n == 1 else 's'} on {label}.")
+    elif data.startswith("reset_no:"):
+        await q.edit_message_text("Cancelled.")
 
 
 async def cmd_app(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -447,8 +764,15 @@ def run():
     app = Application.builder().token(BOT_TOKEN).post_init(_set_menu_button).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("routes", cmd_routes))
+    app.add_handler(CommandHandler("mine", cmd_mine))
+    app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
+    app.add_handler(CommandHandler("hot", cmd_hot))
+    app.add_handler(CommandHandler("setter", cmd_setter))
+    app.add_handler(CommandHandler("search", cmd_search))
+    app.add_handler(CommandHandler("notify", cmd_notify))
     app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("wall", cmd_wall))
+    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("setchat", cmd_setchat))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CallbackQueryHandler(on_callback))

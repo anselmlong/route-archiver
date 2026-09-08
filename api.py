@@ -11,10 +11,12 @@ import os
 import time
 import urllib.parse
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from storage import V_ORDER, Storage
 
@@ -82,8 +84,35 @@ def validate_init_data(raw: str, max_age: int = 86400):
 
 def _identity(body, request):
     """Resolve + verify the acting Telegram user from a request."""
-    raw = body.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
+    raw = body.init_data or request.headers.get("X-Telegram-Init-Data", "")
     return validate_init_data(raw)  # raises ValueError
+
+
+# --------------------------------------------------------------------------- #
+# request bodies (validated at the boundary; handlers below can trust shapes)
+# --------------------------------------------------------------------------- #
+class RateBody(BaseModel):
+    value: Literal[1, 2, 3, 4, 5]
+    init_data: str | None = None
+
+
+class TickBody(BaseModel):
+    suggested_grade: str | None = None
+    init_data: str | None = None
+
+
+class TickGradeBody(BaseModel):
+    suggested_grade: str | None = None
+    init_data: str | None = None
+
+
+class CommentBody(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    init_data: str | None = None
+
+
+class DeleteCommentBody(BaseModel):
+    init_data: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -95,15 +124,18 @@ def index():
 
 
 @app.get("/api/routes")
-def routes(grade: str | None = None, wall: str | None = None,
-           tg: str | None = None,  # type: ignore[assignment]  # optional initData
-           request: "Request" = None):  # type: ignore[assignment]  # fastapi injects
+def routes(request: Request, grade: str | None = None, wall: str | None = None,
+           tg: str | None = None,  # tg: optional initData query param
+           status: Literal["active", "retired", "all"] = "active"):
     """Return routes optionally filtered by minimum grade or exact wall.
 
+    `status` picks "on the wall now" (active, default), routes stripped in
+    a past reset (retired), or both (all) -- retired routes stay tickable
+    since a climber's send history shouldn't vanish when a route comes down.
     Ratings/ticks are attached; my_rating / my_tick are personalised when a
     valid Telegram initData is supplied (as `tg` query param or header).
     """
-    rows = storage.list_routes(grade=grade, wall=wall)
+    rows = storage.list_routes(grade=grade, wall=wall, status=status)
     viewer = None
     raw = tg or request.headers.get("X-Telegram-Init-Data", "")
     if raw:
@@ -119,12 +151,8 @@ def routes(grade: str | None = None, wall: str | None = None,
 
 
 @app.post("/api/rate/{route_id}")
-async def rate(route_id: int, request: Request):
+async def rate(route_id: int, body: RateBody, request: Request):
     """Set (1-5) or clear a user's star rating on a route."""
-    body = await request.json()
-    value = body.get("value")
-    if value not in (1, 2, 3, 4, 5):
-        return JSONResponse(status_code=400, content={"error": "value must be 1-5"})
     try:
         uid, name = _identity(body, request)
     except ValueError as e:
@@ -132,42 +160,210 @@ async def rate(route_id: int, request: Request):
         return JSONResponse(status_code=401, content={"error": str(e)})
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
-    return storage.set_rating(route_id, uid, name, value)
+    return storage.set_rating(route_id, uid, name, body.value)
 
 
 @app.post("/api/tick/{route_id}")
-async def tick(route_id: int, request: Request):
+async def tick(route_id: int, body: TickBody, request: Request):
     """Toggle a user's ascent tick on/off (optionally with a suggested grade)."""
-    body = await request.json()
     try:
         uid, name = _identity(body, request)
     except ValueError as e:
         return JSONResponse(status_code=401, content={"error": str(e)})
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
-    suggested = body.get("suggested_grade")
-    return storage.toggle_tick(route_id, uid, name, suggested)
+    return storage.toggle_tick(route_id, uid, name, body.suggested_grade)
 
 
 @app.put("/api/tick/{route_id}/grade")
-async def tick_grade(route_id: int, request: Request):
+async def tick_grade(route_id: int, body: TickGradeBody, request: Request):
     """Update the suggested grade on an already-existing tick."""
-    body = await request.json()
     try:
         uid, _ = _identity(body, request)
     except ValueError as e:
         return JSONResponse(status_code=401, content={"error": str(e)})
-    suggested = body.get("suggested_grade")
-    storage.set_tick_grade(route_id, uid, suggested)
-    return {"ticked": True, "suggested_grade": suggested}
+    if not storage.get_route(route_id):
+        return JSONResponse(status_code=404, content={"error": "route not found"})
+    storage.set_tick_grade(route_id, uid, body.suggested_grade)
+    return {"ticked": True, "suggested_grade": body.suggested_grade}
+
+
+@app.get("/api/comments/{route_id}")
+def comments(route_id: int, request: Request, tg: str | None = None):
+    """A route's comment thread, oldest first. Public to read (like the
+    route's own description); `is_mine` is personalised the same way
+    my_rating/my_tick are, when a valid initData is supplied."""
+    if not storage.get_route(route_id):
+        return JSONResponse(status_code=404, content={"error": "route not found"})
+    viewer = None
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    if raw:
+        try:
+            viewer, _ = validate_init_data(raw)
+        except ValueError:
+            viewer = None
+    rows = storage.list_comments(route_id)
+    for r in rows:
+        r["is_mine"] = viewer is not None and r["tg_user_id"] == viewer
+        r.pop("tg_user_id", None)
+    return {"comments": rows}
+
+
+@app.post("/api/comments/{route_id}")
+async def add_comment(route_id: int, body: CommentBody, request: Request):
+    """Post a beta/tip comment on a route."""
+    try:
+        uid, name = _identity(body, request)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+    if not storage.get_route(route_id):
+        return JSONResponse(status_code=404, content={"error": "route not found"})
+    try:
+        comment = storage.add_comment(route_id, uid, name, body.text)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    comment["is_mine"] = True
+    comment.pop("tg_user_id", None)
+    return comment
+
+
+@app.delete("/api/comments/{comment_id}")
+async def delete_comment(comment_id: int, body: DeleteCommentBody, request: Request):
+    """Delete your own comment. Moderating someone else's is an
+    admin/bot-side action, not exposed here."""
+    try:
+        uid, _ = _identity(body, request)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+    if not storage.delete_own_comment(comment_id, uid):
+        return JSONResponse(status_code=404, content={"error": "comment not found"})
+    return {"deleted": True}
 
 
 @app.get("/api/meta")
 def meta():
+    stats = storage.stats()
     return {
         "grades": V_ORDER,
         "walls": storage.walls(),
-        "count": storage.stats()["total"],
+        "count": stats["total"],
+        "active_count": stats["active"],
+        "retired_count": stats["retired"],
+    }
+
+
+@app.get("/api/me")
+def me(request: Request, tg: str | None = None):
+    """The calling Telegram user's own send history (personal logbook).
+
+    Requires a valid initData (via `tg` query param or header) -- unlike
+    /api/routes this has no anonymous fallback, since there's no "someone
+    else's" history to show. Routes are shaped identically to /api/routes
+    rows (same rating/tick aggregate fields) so the frontend can reuse the
+    same card + detail-sheet rendering.
+    """
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    try:
+        uid, name = validate_init_data(raw)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+
+    rows = storage.user_ticked_routes(uid)
+    storage.attach_ratings_and_ticks(rows, tg_user_id=uid)
+    for r in rows:
+        r.pop("photo_path", None)
+
+    pyramid: dict[str, int] = {}
+    hardest_grade, hardest_low = None, -1
+    for r in rows:
+        pyramid[r["grade"]] = pyramid.get(r["grade"], 0) + 1
+        if r["grade_low"] > hardest_low:
+            hardest_low, hardest_grade = r["grade_low"], r["grade"]
+
+    return {
+        "name": name,
+        "routes": rows,
+        "count": len(rows),
+        "grade_pyramid": pyramid,
+        "hardest_grade": hardest_grade,
+    }
+
+
+@app.get("/api/leaderboard")
+def leaderboard(limit: int = 10):
+    """Public leaderboards -- top climbers (send count + hardest grade)
+    and top setters (routes archived). No auth needed, this is aggregate
+    data, not anyone's personal record."""
+    limit = max(1, min(limit, 50))
+    return {
+        "climbers": storage.leaderboard_climbers(limit),
+        "setters": storage.leaderboard_setters(limit),
+    }
+
+
+@app.get("/api/hot")
+def hot(request: Request, days: int = 7, limit: int = 10, tg: str | None = None):
+    """Routes with the most ticks in the last `days` days -- rank #1 is
+    the "route of the week". Personalised the same way /api/routes is
+    (optional tg initData), public otherwise since it's aggregate data."""
+    days = max(1, min(days, 90))
+    limit = max(1, min(limit, 50))
+    rows = storage.hot_routes(days=days, limit=limit)
+    viewer = None
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    if raw:
+        try:
+            viewer, _ = validate_init_data(raw)
+        except ValueError:
+            viewer = None
+    storage.attach_ratings_and_ticks(rows, tg_user_id=viewer)
+    for r in rows:
+        r.pop("photo_path", None)
+    return {"routes": rows, "days": days}
+
+
+@app.get("/api/setter/{setter_id}")
+def setter(setter_id: int, request: Request, tg: str | None = None):
+    """A setter's public profile: their routes (personalised the same way
+    /api/routes is), a weighted average of ratings received across those
+    routes, and their most-ticked route."""
+    profile = storage.setter_profile(setter_id)
+    if not profile:
+        raise HTTPException(404, "setter not found")
+
+    routes = profile["routes"]
+    viewer = None
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    if raw:
+        try:
+            viewer, _ = validate_init_data(raw)
+        except ValueError:
+            viewer = None
+    storage.attach_ratings_and_ticks(routes, tg_user_id=viewer)
+    for r in routes:
+        r.pop("photo_path", None)
+
+    total_rating_pts = sum((r["avg_rating"] or 0) * r["rating_count"] for r in routes)
+    total_rating_count = sum(r["rating_count"] for r in routes)
+    avg_rating_received = (
+        round(total_rating_pts / total_rating_count * 2) / 2 if total_rating_count else None
+    )
+    most_ticked = max(routes, key=lambda r: r["tick_count"], default=None)
+    most_ticked_route = (
+        {"name": most_ticked["name"], "tick_count": most_ticked["tick_count"]}
+        if most_ticked and most_ticked["tick_count"] > 0 else None
+    )
+
+    return {
+        "setter_id": profile["setter_id"],
+        "setter_name": profile["setter_name"],
+        "routes_set": profile["routes_set"],
+        "active": profile["active"],
+        "retired": profile["retired"],
+        "avg_rating_received": avg_rating_received,
+        "rating_count": total_rating_count,
+        "most_ticked_route": most_ticked_route,
+        "routes": routes,
     }
 
 
