@@ -606,6 +606,45 @@ class Storage:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def setter_profile(self, setter_id):
+        """A setter's own routes (active + retired, not deleted), newest-
+        graded first. None if this setter_id has never set anything.
+        Rating/tick aggregates aren't attached here -- callers that want
+        them (the API layer) run attach_ratings_and_ticks on the result,
+        same as any other route list."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM routes WHERE setter_id=? AND deleted=0 "
+                "ORDER BY grade_low DESC, created_at DESC",
+                (setter_id,),
+            ).fetchall()
+        routes = [dict(r) for r in rows]
+        if not routes:
+            return None
+        name = next((r["setter_name"] for r in routes if r["setter_name"]), None)
+        active = sum(1 for r in routes if not r["retired_at"])
+        return {
+            "setter_id": setter_id,
+            "setter_name": name,
+            "routes_set": len(routes),
+            "active": active,
+            "retired": len(routes) - active,
+            "routes": routes,
+        }
+
+    def find_setter_id(self, name):
+        """Case-insensitive substring match against setter_name (active +
+        retired routes only). Returns the first matching setter_id, or
+        None. Used by the bot's /setter <name> lookup -- the mini-app
+        links to a setter profile directly by id instead."""
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT setter_id FROM routes WHERE deleted=0 AND setter_id IS NOT NULL "
+                "AND setter_name LIKE ? LIMIT 1",
+                (f"%{name}%",),
+            ).fetchone()
+        return row["setter_id"] if row else None
+
     def attach_ratings_and_ticks(self, routes, tg_user_id=None):
         """Mutate route dicts in place: avg/count/my_rating, tick_count/my_tick."""
         if not routes:

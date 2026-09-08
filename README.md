@@ -45,6 +45,9 @@ they just keep posting route pics.
 - **Route of the week** — `/hot` (bot) or the mini-app's "🔥 Hot" tab: the
   routes with the most sends in the last 7 days, rank #1 being the de
   facto route of the week.
+- **Setter profiles** — `/setter <name>` (bot), or tap a route's "set by
+  X" credit in the mini-app: routes set (active/retired), a weighted
+  average of ratings received, and their most-sent route.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |

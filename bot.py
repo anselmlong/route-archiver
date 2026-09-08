@@ -290,7 +290,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "tag the wall automatically.\n\n"
         "/mine — your own send history\n"
         "/leaderboard — top climbers & setters\n"
-        "/hot — what's hot this week\n\n"
+        "/hot — what's hot this week\n"
+        "/setter <name> — a setter's profile\n\n"
         "Tap for the full collection.",
         parse_mode="Markdown",
         reply_markup=_app_link({}),
@@ -396,6 +397,31 @@ async def cmd_hot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         rank = _MEDALS[i] if i < 3 else f"{i + 1}."
         n = r["recent_ticks"]
         lines.append(f"{rank} {_route_line(r)} — {n} send{'' if n == 1 else 's'} this week")
+    await update.effective_message.reply_text(
+        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
+    )
+
+
+async def cmd_setter(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """A setter's own profile by name: /setter <name>."""
+    args = ctx.args or []
+    if not args:
+        await update.effective_message.reply_text("Usage: /setter <name>")
+        return
+    name = " ".join(args)
+    setter_id = storage.find_setter_id(name)
+    if setter_id is None:
+        await update.effective_message.reply_text(f"No setter matching {name!r}.")
+        return
+    profile = storage.setter_profile(setter_id)
+    lines = [
+        f"🔨 *{_md_escape(profile['setter_name'])}*",
+        f"{profile['routes_set']} routes set · {profile['active']} active · {profile['retired']} retired",
+    ]
+    for r in profile["routes"][:15]:
+        lines.append(_route_line(r))
+    if len(profile["routes"]) > 15:
+        lines.append(f"\n…and {len(profile['routes']) - 15} more. Open the collection for all.")
     await update.effective_message.reply_text(
         "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
     )
@@ -637,6 +663,7 @@ def run():
     app.add_handler(CommandHandler("mine", cmd_mine))
     app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
     app.add_handler(CommandHandler("hot", cmd_hot))
+    app.add_handler(CommandHandler("setter", cmd_setter))
     app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("reset", cmd_reset))

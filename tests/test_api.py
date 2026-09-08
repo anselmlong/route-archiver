@@ -424,6 +424,51 @@ def test_hot_days_and_limit_are_clamped(client, api_module):
 
 
 # --------------------------------------------------------------------------- #
+# GET /api/setter/{id}
+# --------------------------------------------------------------------------- #
+def test_setter_404_when_never_set_anything(client, api_module):
+    r = client.get("/api/setter/999")
+    assert r.status_code == 404
+
+
+def test_setter_aggregates_routes_active_retired_and_rating(client, api_module):
+    a = _seed_route(api_module, name="A", grade="V4", grade_low=5, setter_name="Sam", setter_id=10)
+    b = _seed_route(api_module, name="B", grade="V6", grade_low=7, setter_name="Sam", setter_id=10)
+    s = api_module.storage
+    s.retire_route(b["id"])
+    s.set_rating(a["id"], tg_user_id=1, tg_user_name="X", value=4)
+    s.set_rating(b["id"], tg_user_id=2, tg_user_name="Y", value=2)
+    s.toggle_tick(a["id"], tg_user_id=1, tg_user_name="X")
+    s.toggle_tick(a["id"], tg_user_id=2, tg_user_name="Y")
+    s.toggle_tick(b["id"], tg_user_id=1, tg_user_name="X")
+
+    body = client.get("/api/setter/10").json()
+    assert body["setter_name"] == "Sam"
+    assert body["routes_set"] == 2
+    assert body["active"] == 1
+    assert body["retired"] == 1
+    assert body["rating_count"] == 2
+    assert body["avg_rating_received"] == 3.0  # (4+2)/2
+    assert body["most_ticked_route"] == {"name": "A", "tick_count": 2}
+    assert "photo_path" not in body["routes"][0]
+
+
+def test_setter_no_ratings_reports_none_avg(client, api_module):
+    _seed_route(api_module, setter_name="Sam", setter_id=10)
+    body = client.get("/api/setter/10").json()
+    assert body["avg_rating_received"] is None
+    assert body["most_ticked_route"] is None
+
+
+def test_setter_personalizes_when_tg_param_given(client, api_module):
+    route = _seed_route(api_module, setter_name="Sam", setter_id=10)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    api_module.storage.toggle_tick(route["id"], tg_user_id=1, tg_user_name="A")
+    row = client.get("/api/setter/10", params={"tg": raw}).json()["routes"][0]
+    assert row["my_tick"] == 1
+
+
+# --------------------------------------------------------------------------- #
 # misc
 # --------------------------------------------------------------------------- #
 def test_healthz(client):

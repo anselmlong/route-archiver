@@ -261,6 +261,51 @@ def hot(request: Request, days: int = 7, limit: int = 10, tg: str | None = None)
     return {"routes": rows, "days": days}
 
 
+@app.get("/api/setter/{setter_id}")
+def setter(setter_id: int, request: Request, tg: str | None = None):
+    """A setter's public profile: their routes (personalised the same way
+    /api/routes is), a weighted average of ratings received across those
+    routes, and their most-ticked route."""
+    profile = storage.setter_profile(setter_id)
+    if not profile:
+        raise HTTPException(404, "setter not found")
+
+    routes = profile["routes"]
+    viewer = None
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    if raw:
+        try:
+            viewer, _ = validate_init_data(raw)
+        except ValueError:
+            viewer = None
+    storage.attach_ratings_and_ticks(routes, tg_user_id=viewer)
+    for r in routes:
+        r.pop("photo_path", None)
+
+    total_rating_pts = sum((r["avg_rating"] or 0) * r["rating_count"] for r in routes)
+    total_rating_count = sum(r["rating_count"] for r in routes)
+    avg_rating_received = (
+        round(total_rating_pts / total_rating_count * 2) / 2 if total_rating_count else None
+    )
+    most_ticked = max(routes, key=lambda r: r["tick_count"], default=None)
+    most_ticked_route = (
+        {"name": most_ticked["name"], "tick_count": most_ticked["tick_count"]}
+        if most_ticked and most_ticked["tick_count"] > 0 else None
+    )
+
+    return {
+        "setter_id": profile["setter_id"],
+        "setter_name": profile["setter_name"],
+        "routes_set": profile["routes_set"],
+        "active": profile["active"],
+        "retired": profile["retired"],
+        "avg_rating_received": avg_rating_received,
+        "rating_count": total_rating_count,
+        "most_ticked_route": most_ticked_route,
+        "routes": routes,
+    }
+
+
 @app.get("/api/photo/{route_id}")
 def photo(route_id: int):
     r = storage.get_route(route_id)

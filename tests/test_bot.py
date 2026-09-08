@@ -338,3 +338,35 @@ def test_cmd_hot_ranks_by_recent_ticks(bot_module):
     assert text.index("Popular") < text.index("Quiet")
     assert "2 sends this week" in text
     assert "1 send this week" in text
+
+
+# --------------------------------------------------------------------------- #
+# /setter -- also open to any user
+# --------------------------------------------------------------------------- #
+def test_cmd_setter_usage_without_args(bot_module):
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_setter(update, FakeCtx(args=[])))
+    assert "Usage" in msg.replies[0]["text"]
+
+
+def test_cmd_setter_not_found(bot_module):
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_setter(update, FakeCtx(args=["Nobody"])))
+    assert "No setter matching" in msg.replies[0]["text"]
+
+
+def test_cmd_setter_shows_profile_by_partial_name(bot_module):
+    _seed(bot_module, name="Crack Line", grade="V4", grade_low=5,
+          setter_name="Sam Smith", setter_id=10)
+    _seed(bot_module, name="Not Sam's", grade="V2", grade_low=2,
+          setter_name="Ana", setter_id=20)
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_setter(update, FakeCtx(args=["sam"])))
+    text = msg.replies[0]["text"]
+    assert "Sam Smith" in text
+    assert "1 routes set" in text  # matches cmd_leaderboard's (imperfect) grammar
+    assert "Crack Line" in text
+    assert "Not Sam's" not in text

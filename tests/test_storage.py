@@ -483,3 +483,43 @@ def test_hot_routes_respects_limit(storage):
 def test_hot_routes_empty_when_no_ticks(storage):
     storage.add_route(name="A", grade="V4", grade_low=5)
     assert storage.hot_routes() == []
+
+
+# --------------------------------------------------------------------------- #
+# Storage: setter profile
+# --------------------------------------------------------------------------- #
+def test_setter_profile_none_when_never_set_anything(storage):
+    assert storage.setter_profile(999) is None
+
+
+def test_setter_profile_aggregates_routes_and_active_retired_split(storage):
+    a = storage.add_route(name="A", grade="V4", grade_low=5, setter_name="Sam", setter_id=10)
+    b = storage.add_route(name="B", grade="V6", grade_low=7, setter_name="Sam", setter_id=10)
+    storage.retire_route(b["id"])
+    other = storage.add_route(name="C", grade="V1", grade_low=1, setter_name="Ana", setter_id=20)
+
+    profile = storage.setter_profile(10)
+    assert profile["setter_name"] == "Sam"
+    assert profile["routes_set"] == 2
+    assert profile["active"] == 1
+    assert profile["retired"] == 1
+    assert {r["name"] for r in profile["routes"]} == {"A", "B"}
+
+
+def test_setter_profile_excludes_deleted_routes(storage):
+    a = storage.add_route(name="A", grade="V4", grade_low=5, setter_name="Sam", setter_id=10)
+    storage.delete_route(a["id"])
+    assert storage.setter_profile(10) is None
+
+
+def test_find_setter_id_case_insensitive_substring_match(storage):
+    storage.add_route(name="A", grade="V4", grade_low=5, setter_name="Sam Smith", setter_id=10)
+    assert storage.find_setter_id("sam") == 10
+    assert storage.find_setter_id("SMITH") == 10
+    assert storage.find_setter_id("nonexistent") is None
+
+
+def test_find_setter_id_ignores_deleted_routes(storage):
+    a = storage.add_route(name="A", grade="V4", grade_low=5, setter_name="Sam", setter_id=10)
+    storage.delete_route(a["id"])
+    assert storage.find_setter_id("sam") is None

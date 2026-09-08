@@ -108,6 +108,36 @@ def consensus_live_server(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def setter_live_server(tmp_path, monkeypatch):
+    """A separate live server with routes that actually have a
+    setter_name, so the "set by X" link (and the setter-profile drill-
+    down it opens) can be exercised -- the shared `live_server` fixture
+    deliberately has none, so its leaderboard's setter board stays empty."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "setter_test.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+
+    photo = tmp_path / "route.png"
+    photo.write_bytes(_PNG_1PX)
+
+    s = api_mod.storage
+    r1 = s.add_route(name="Crimpy Wall", grade="V4", grade_low=5, wall="Left",
+                      setter_name="Sam Smith", setter_id=10, photo_path=str(photo))
+    r2 = s.add_route(name="Slopey Arete", grade="V6", grade_low=7, wall="Right",
+                      setter_name="Sam Smith", setter_id=10, photo_path=str(photo))
+    s.retire_route(r2["id"])
+    s.set_rating(r1["id"], tg_user_id=1, tg_user_name="A", value=4)
+
+    base_url, server, thread = _boot_server(api_mod.app)
+    yield {"base_url": base_url, "r1": r1, "r2_retired": r2}
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+@pytest.fixture
 def page(live_server):
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
@@ -464,3 +494,51 @@ def test_hot_view_empty_state_when_nothing_ticked_this_week(tmp_path, monkeypatc
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# --------------------------------------------------------------------------- #
+# Setter profile drill-down
+# --------------------------------------------------------------------------- #
+def test_clicking_setter_name_opens_their_profile(setter_live_server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(setter_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+
+        pg.locator(".card", has_text="Crimpy Wall").click()
+        pg.wait_for_selector(".scrim.open")
+        pg.locator(".setterlink").click()
+        pg.wait_for_selector("#setterStats:not([hidden])")
+
+        stats = pg.locator("#setterStats").inner_text()
+        assert "Sam Smith" in stats
+        assert "2 routes set" in stats
+        assert "1 active, 1 retired" in stats
+        assert "4.0" in stats  # avg rating received
+
+        # both of Sam's routes render in the reused grid, active + retired
+        pg.wait_for_function("document.querySelectorAll('.card').length === 2")
+        names = set(pg.locator(".nm").all_inner_texts())
+        assert names == {"Crimpy Wall", "Slopey Arete"}
+        browser.close()
+
+
+def test_setter_profile_back_button_returns_to_browse(setter_live_server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(setter_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+
+        pg.locator(".card", has_text="Crimpy Wall").click()
+        pg.wait_for_selector(".scrim.open")
+        pg.locator(".setterlink").click()
+        pg.wait_for_selector("#setterStats:not([hidden])")
+
+        pg.locator("#setterBack").click()
+        pg.wait_for_selector("#browseControls:not([hidden])")
+        assert pg.locator("#setterStats").is_hidden()
+        # default active-only browse view: Sam's retired route drops out
+        pg.wait_for_function("document.querySelectorAll('.card').length === 1")
+        browser.close()

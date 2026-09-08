@@ -93,6 +93,8 @@
   .consensus b{color:var(--text)}
   .dd{color:var(--muted);font-size:13.5px;line-height:1.5;margin-top:10px}
   .foot{color:var(--muted);font-size:12.5px;margin-top:12px}
+  .setterlink{color:inherit;font:inherit;background:none;border:0;padding:0;text-decoration:underline;text-decoration-color:var(--line);cursor:pointer}
+  .backbtn{display:block;margin-top:8px;background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 12px;font-size:12.5px;cursor:pointer}
 
   /* rating row */
   .rate{display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
@@ -150,6 +152,7 @@
 
   <div class="mine-stats" id="mineStats" hidden></div>
   <div class="mine-stats" id="hotStats" hidden></div>
+  <div class="mine-stats" id="setterStats" hidden></div>
   <div class="board" id="board" hidden></div>
 
   <div class="grid" id="grid"></div>
@@ -186,7 +189,7 @@
 <script>
 const $=s=>document.querySelector(s);
 const state={routes:[],sort:"grade",wall:"",status:"active",min:0,max:1,grades:[],cur:null,initData:"",
-  view:"browse",curList:[],mine:null,board:null,hot:null};
+  view:"browse",curList:[],mine:null,board:null,hot:null,setter:null};
 
 (function tg(){
   if(window.Telegram&&window.Telegram.WebApp){
@@ -258,13 +261,15 @@ function paint(){
 }
 
 function findRoutes(id){
-  // the same route can exist as separate object instances in state.routes
-  // (browse), state.mine.routes (personal logbook) and state.hot.routes
-  // (this week's hot list) -- return every copy so a rating/tick updates
+  // the same route can exist as separate object instances across
+  // state.routes (browse), state.mine.routes (personal logbook),
+  // state.hot.routes (this week's hot list) and state.setter.routes (a
+  // setter's profile) -- return every copy so a rating/tick updates
   // whichever one is actually on screen
   const out=state.routes.filter(x=>x.id===id);
   if(state.mine)out.push(...state.mine.routes.filter(x=>x.id===id));
   if(state.hot)out.push(...state.hot.routes.filter(x=>x.id===id));
+  if(state.setter)out.push(...state.setter.routes.filter(x=>x.id===id));
   return out;
 }
 
@@ -313,6 +318,7 @@ function setView(v){
   $("#browseControls").hidden=v!=="browse";
   $("#mineStats").hidden=v!=="mine";
   $("#hotStats").hidden=v!=="hot";
+  $("#setterStats").hidden=true;
   $("#board").hidden=v!=="board";
   $("#grid").hidden=v==="board";
   $("#empty").hidden=true;
@@ -393,6 +399,63 @@ function renderHot(){
   $("#count").textContent="";
   $("#empty").textContent="No sends yet this week — be the first!";
   renderGrid(h.routes);
+}
+
+/* ---- setter profile (drill-down from a route's "set by" link) ---- */
+async function openSetter(setterId){
+  if(!setterId)return;
+  closeSheet();
+  state.view="setter";
+  $("#viewseg").querySelectorAll("button").forEach(b=>b.classList.remove("on"));
+  $("#browseControls").hidden=true;
+  $("#mineStats").hidden=true;
+  $("#hotStats").hidden=true;
+  $("#board").hidden=true;
+  $("#grid").hidden=false;
+  $("#empty").hidden=true;
+  $("#setterStats").hidden=false;
+  $("#setterStats").innerHTML='<div class="empty">loading…</div>';
+  $("#sub").textContent="loading setter…";
+  try{
+    let q="/api/setter/"+setterId;
+    if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
+    state.setter=await fetch(q).then(x=>x.json());
+    $("#sub").textContent="tap a card for details";
+    renderSetter();
+  }catch(e){
+    $("#sub").textContent="tap a card for details";
+    $("#setterStats").innerHTML='<div class="empty">Couldn\'t load this setter.</div>';
+  }
+}
+
+function renderSetter(){
+  const p=state.setter;
+  if(!p)return;
+  if(p.detail){
+    // FastAPI's default 404 body ({"detail": "..."}) -- setter not found
+    $("#setterStats").innerHTML='<div class="empty">Setter not found.</div>'+
+      '<button class="backbtn" id="setterBack">← Back to Browse</button>';
+    $("#setterBack").onclick=()=>setView("browse");
+    $("#count").textContent="";
+    $("#grid").innerHTML="";
+    $("#empty").hidden=true;
+    return;
+  }
+  const avg=p.avg_rating_received!=null
+    ?`${fmtAvg(p.avg_rating_received)} ★ avg (${p.rating_count})`
+    :"no ratings yet";
+  const most=p.most_ticked_route
+    ?`<div class="mrow">Most sent: <b>${esc(p.most_ticked_route.name)}</b> (${p.most_ticked_route.tick_count})</div>`
+    :"";
+  $("#setterStats").innerHTML=
+    `<div class="mrow"><b>${esc(p.setter_name||"Setter")}</b> · ${p.routes_set} route${p.routes_set===1?"":"s"} set `+
+    `(${p.active} active, ${p.retired} retired) · ${avg}</div>`+
+    most+
+    `<button class="backbtn" id="setterBack">← Back to Browse</button>`;
+  $("#setterBack").onclick=()=>setView("browse");
+  $("#count").textContent="";
+  $("#empty").textContent="This setter has no routes.";
+  renderGrid(p.routes);
 }
 
 async function loadBoard(){
@@ -484,7 +547,18 @@ function refreshSheet(){
   }
   const n=r.tick_count||0;
   $("#sascent").textContent=n+(n===1?" ascent":" ascents");
-  $("#sfoot").textContent=((r.setter_name?"set by "+r.setter_name:"")+" · "+fmtDate(r.created_at));
+  const foot=$("#sfoot");
+  foot.innerHTML="";
+  if(r.setter_name){
+    const btn=document.createElement("button");
+    btn.className="setterlink";
+    btn.textContent="set by "+r.setter_name;
+    btn.onclick=()=>openSetter(r.setter_id);
+    foot.appendChild(btn);
+    foot.appendChild(document.createTextNode(" · "+fmtDate(r.created_at)));
+  }else{
+    foot.textContent=fmtDate(r.created_at);
+  }
 }
 function open(r){
   state.cur=r;
