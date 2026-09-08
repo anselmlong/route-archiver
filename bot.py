@@ -66,9 +66,8 @@ def _route_line(r: dict) -> str:
 def _app_link(r: dict) -> InlineKeyboardMarkup:
     """WebApp button that opens the collection as a full-screen Telegram Mini App.
 
-    Domain routes.anselmlong.com is registered with the bot (@BotFather), so
-    inline web_app buttons are allowed (unregistered domains get
-    'Button_type_invalid').
+    Domain whitelisted with the bot via @BotFather /setdomain, so inline web_app
+    buttons are allowed (unwhitelisted domains get 'Button_type_invalid').
     """
     kb = [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]]
     return InlineKeyboardMarkup(kb)
