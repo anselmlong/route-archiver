@@ -15,7 +15,7 @@ they just keep posting route pics.
 ## Features
 - **Auto-archive** — captioned route photos in the group are parsed and saved
   (name, grade, wall, setter, photo).
-- **Mini-app** (`routes.anselmlong.com`) — sortable/filterable grid by grade
+- **Mini-app** (`routes.anselmlong.com`) — sortable/filterable list by grade
   (VB–V8+) and wall section (left vertical / middle overhang / right slab);
   tap a route for the full photo + setter name.
 - **Admin CRUD** — admins can edit/delete routes from the inline buttons on the

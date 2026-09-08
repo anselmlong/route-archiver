@@ -64,8 +64,13 @@ def live_server(tmp_path, monkeypatch):
     s = api_mod.storage
     r1 = s.add_route(name="Crack Line", grade="V4", grade_low=5, wall="Left",
                       description="crimpy start", photo_path=str(photo))
+    # hostile setter_name but NO setter_id: the strip renders the name (so
+    # list-level escaping is exercised) while leaderboard_setters -- which
+    # groups on setter_id -- still sees an empty setter board
     r2 = s.add_route(name='Weird "Name" & <tag>', grade="V6", grade_low=7, wall="Right",
-                      description="<script>window.__xss=1</script>", photo_path=str(photo))
+                      description="<script>window.__xss=1</script>",
+                      setter_name='Eve <img src=x onerror="window.__xss=1">',
+                      photo_path=str(photo))
     s.set_rating(r1["id"], tg_user_id=1, tg_user_name="A", value=5)
     s.toggle_tick(r1["id"], tg_user_id=1, tg_user_name="A", suggested_grade="V4")
 
@@ -183,15 +188,18 @@ def test_cards_render_with_grade_and_wall(page, live_server):
     assert "Crack Line" in names
 
 
-def test_description_and_name_are_escaped_not_executed(page):
-    """r2's name/description contain HTML metacharacters and a literal
-    <script> tag; the frontend must render them as inert text (grid via
-    esc()-then-innerHTML, sheet via textContent) and never execute them."""
+def test_user_text_is_escaped_not_executed(page):
+    """r2's name, setter_name and description carry HTML metacharacters
+    and live payloads; the frontend must render them as inert text (strip
+    via esc()-then-innerHTML, sheet via textContent) and never execute
+    them. Description isn't shown in the strip any more, so the list-level
+    check rides on setter_name."""
     assert page.evaluate("window.__xss") is None
 
     hostile_card = page.locator(".card", has_text="Weird")
-    assert "<script>" in hostile_card.locator(".desc").inner_text()
-    assert hostile_card.locator(".desc script").count() == 0
+    meta = hostile_card.locator(".meta")
+    assert 'set by Eve <img src=x onerror="window.__xss=1">' in meta.inner_text()
+    assert hostile_card.locator(".meta img").count() == 0
 
     hostile_card.click()
     page.wait_for_selector(".scrim.open")
@@ -351,7 +359,9 @@ def test_retired_badge_shown_in_detail_sheet(authed_page):
     # user ticked it before it came down) -- that's how we reach a
     # retired route's sheet now that Browse never shows one
     authed_page.locator('[data-view="mine"]').click()
-    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    # #mineStats .mrow only exists once /api/me has resolved and renderMine
+    # ran -- a card count would be satisfied by Browse's grid already
+    authed_page.wait_for_selector("#mineStats .mrow")
     authed_page.locator(".card", has_text="Stripped Slab").click()
     authed_page.wait_for_selector(".scrim.open")
     assert authed_page.locator("#sretired").is_visible()
@@ -379,7 +389,7 @@ def test_mine_view_without_telegram_prompts_open_message(page):
 
 def test_mine_view_shows_my_ticks_with_stats(authed_page):
     authed_page.locator('[data-view="mine"]').click()
-    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    authed_page.wait_for_selector("#mineStats .mrow")
     names = set(authed_page.locator(".nm").all_inner_texts())
     assert names == {"Crack Line", "Stripped Slab"}
     stats = authed_page.locator("#mineStats").inner_text()
@@ -389,7 +399,7 @@ def test_mine_view_shows_my_ticks_with_stats(authed_page):
 
 def test_mine_view_shows_retired_badge_on_retired_tick(authed_page):
     authed_page.locator('[data-view="mine"]').click()
-    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    authed_page.wait_for_selector("#mineStats .mrow")
     retired_card = authed_page.locator(".card", has_text="Stripped Slab")
     assert retired_card.locator(".retired").count() == 1
     active_card = authed_page.locator(".card", has_text="Crack Line")
@@ -471,7 +481,8 @@ def test_consensus_grade_hidden_when_no_ticks(page):
 # --------------------------------------------------------------------------- #
 def test_hot_view_shows_ticked_routes_with_stats_header(page):
     page.locator('[data-view="hot"]').click()
-    page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    # same reasoning as Mine: wait for Hot's own header, not a card count
+    page.wait_for_selector("#hotStats .mrow")
     names = set(page.locator(".nm").all_inner_texts())
     # Crack Line and Stripped Slab both have a tick in the fixture;
     # "Weird Name" has none, so it's excluded from Hot entirely
@@ -481,7 +492,7 @@ def test_hot_view_shows_ticked_routes_with_stats_header(page):
 
 def test_hot_view_card_shows_recent_tick_badge(page):
     page.locator('[data-view="hot"]').click()
-    page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    page.wait_for_selector("#hotStats .mrow")
     badge = page.locator(".card", has_text="Crack Line").locator(".hotcount")
     assert badge.count() == 1
     assert "🔥" in badge.inner_text()
@@ -525,7 +536,9 @@ def test_clicking_setter_name_opens_their_profile(setter_live_server):
         pg.locator(".card", has_text="Crimpy Wall").click()
         pg.wait_for_selector(".scrim.open")
         pg.locator(".setterlink").click()
-        pg.wait_for_selector("#setterStats:not([hidden])")
+        # #setterStats is unhidden synchronously with a "loading…"
+        # placeholder; .mrow only appears once the profile has loaded
+        pg.wait_for_selector("#setterStats .mrow")
 
         stats = pg.locator("#setterStats").inner_text()
         assert "Sam Smith" in stats

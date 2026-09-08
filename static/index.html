@@ -41,19 +41,17 @@
   .rail{position:absolute;left:0;right:0;top:13px;height:4px;border-radius:2px;background:var(--line)}
   .rail .fill{position:absolute;top:0;height:4px;border-radius:2px;background:var(--accent)}
 
-  /* cards */
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin-top:12px}
+  /* route strips: thumb · name / badges / wall+setter · grade on the right edge */
+  .grid{display:flex;flex-direction:column;gap:8px;margin-top:12px}
   .grid[hidden]{display:none}
-  .card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;transition:transform .06s}
+  .card{display:flex;align-items:center;gap:12px;min-height:84px;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;cursor:pointer;transition:transform .06s}
   .card:active{transform:scale(.98)}
-  .card img{width:100%;display:block;background:var(--panel)}
-  .info{padding:9px 11px;display:flex;flex-direction:column;gap:3px}
-  .nm{font-size:14px;font-weight:600;line-height:1.25}
-  .meta{display:flex;gap:7px;flex-wrap:wrap}
-  .tag{font-size:12px;color:var(--accent);font-weight:700}
-  .wall{font-size:11.5px;color:var(--muted)}
+  .card img{width:64px;height:64px;flex-shrink:0;border-radius:8px;object-fit:cover;background:#0a0c10}
+  .info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .nm{font-size:14.5px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+  .grade{font-size:17px;font-weight:700;color:var(--accent);flex-shrink:0;letter-spacing:-.01em}
   .retired{font-size:10.5px;color:var(--muted);border:1px solid var(--dim);border-radius:6px;padding:1px 6px;text-transform:uppercase;letter-spacing:.03em}
-  .desc{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .stars{color:var(--star);font-size:12px;letter-spacing:1px}
   .starcount{color:var(--muted);font-size:11px}
   .tickcount{color:var(--tick);font-size:11px}
@@ -304,21 +302,23 @@ function renderGrid(list){
   $("#count").textContent=list.length+" route"+(list.length===1?"":"s");
   const grid=$("#grid"), empty=$("#empty");
   empty.hidden=!!list.length;
-  grid.innerHTML=list.map(r=>`
+  grid.innerHTML=list.map(r=>{
+    const where=[r.wall?esc(r.wall):"", r.setter_name?"set by "+esc(r.setter_name):""].filter(Boolean).join(" · ");
+    return `
     <div class="card" data-id="${r.id}">
       <img loading="lazy" src="/api/photo/${r.id}" alt="" onerror="this.style.visibility='hidden'">
       <div class="info">
         <div class="nm"></div>
-        <div class="meta"><span class="tag">${esc(r.grade)}</span>${r.wall?`<span class="wall">· ${esc(r.wall)}</span>`:""}${r.retired_at?'<span class="retired">Retired</span>':""}</div>
-        ${r.description?`<div class="desc">${esc(r.description)}</div>`:""}
         <div class="badges">
           ${stars(r.avg_rating)}<span class="starcount">${r.rating_count||""}</span>
           ${(r.tick_count||0)>0?`<span class="tickcount">✓ ${r.tick_count}</span>`:""}
           ${r.recent_ticks?`<span class="hotcount">🔥 ${r.recent_ticks}</span>`:""}
           ${(r.comment_count||0)>0?`<span class="commentcount">💬 ${r.comment_count}</span>`:""}
         </div>
+        ${where||r.retired_at?`<div class="meta">${where?`<span>${where}</span>`:""}${r.retired_at?'<span class="retired">Retired</span>':""}</div>`:""}
       </div>
-    </div>`).join("");
+      <div class="grade">${esc(r.grade)}</div>
+    </div>`}).join("");
 
   grid.querySelectorAll(".card").forEach(c=>{
     const r=list.find(x=>x.id===Number(c.dataset.id));
