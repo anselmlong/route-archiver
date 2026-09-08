@@ -28,12 +28,16 @@
   .seg button.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
   select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:13.5px}
 
-  /* min-grade slider */
-  .filters{display:flex;flex-direction:column;gap:2px;margin:6px 0 2px}
-  .minrow{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px}
-  #min{width:100%;-webkit-appearance:none;appearance:none;height:26px;background:var(--panel);border:1px solid var(--line);border-radius:13px;outline:none}
-  #min::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);cursor:pointer;margin-top:-1px}
-  #min::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);cursor:pointer}
+  /* dual-thumb min/max grade slider */
+  .filters{display:flex;flex-direction:column;gap:4px;margin:6px 0 2px}
+  .gradelab{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px}
+  .gradelab b{color:var(--text);font-weight:600}
+  .range-wrap{position:relative;height:30px}
+  #min,#max{position:absolute;left:0;right:0;top:4px;width:100%;-webkit-appearance:none;appearance:none;height:22px;background:transparent;pointer-events:none;margin:0}
+  #min::-webkit-slider-thumb,#max::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);pointer-events:all;cursor:pointer;margin-top:-4px}
+  #min::-moz-range-thumb,#max::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);pointer-events:all;cursor:pointer}
+  .rail{position:absolute;left:0;right:0;top:13px;height:4px;border-radius:2px;background:var(--line)}
+  .rail .fill{position:absolute;top:0;height:4px;border-radius:2px;background:var(--accent)}
 
   /* cards */
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin-top:12px}
@@ -86,8 +90,12 @@
   </div>
 
   <div class="filters">
-    <div class="minrow"><span id="minLab">All grades</span></div>
-    <input type="range" id="min" min="0" max="1" value="0" step="1">
+    <div class="gradelab"><span id="minLab">VB</span><span id="rangeLab" style="color:var(--text);font-weight:650"></span><span id="maxLab">V8+</span></div>
+    <div class="range-wrap">
+      <div class="rail"><div class="fill" id="dFill"></div></div>
+      <input type="range" id="min" min="0" max="1" value="0" step="1">
+      <input type="range" id="max" min="0" max="1" value="1" step="1">
+    </div>
   </div>
 
   <div class="grid" id="grid"></div>
@@ -110,7 +118,7 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const state={routes:[],sort:"grade",wall:"",min:0,grades:[],cur:null,initData:""};
+const state={routes:[],sort:"grade",wall:"",min:0,max:1,grades:[],cur:null,initData:""};
 
 (function tg(){
   if(window.Telegram&&window.Telegram.WebApp){
@@ -127,10 +135,13 @@ async function load(){
   const r=await fetch("/api/routes"+q).then(x=>x.json());
   const k=await fetch("/api/meta").then(x=>x.json());
   state.routes=r.routes; state.grades=["all",...k.grades];
-  $("#min").max=state.grades.length-1;
+  const n=state.grades.length-1;
+  state.min=0; state.max=n;
+  $("#min").min=0; $("#min").max=n; $("#min").value=0;
+  $("#max").min=0; $("#max").max=n; $("#max").value=n;
   setWallOptions(k.walls);
+  updateRangeUI();
   paint();
-  updateMinLab();
 }
 
 function setWallOptions(walls){
@@ -148,8 +159,9 @@ function gradeIdx(g){ // index of a route's grade within the real scale
 function filtered(){
   let l=state.routes;
   if(state.wall)l=l.filter(r=>r.wall===state.wall);
-  const minIdx=state.min-1;                   // grade_low threshold (all => -1)
-  if(minIdx>=0)l=l.filter(r=>r.grade_low>=minIdx&&r.grade_low!==-1);
+  const lo=state.min-1, hi=state.max-1;   // grade_low threshold (all=>-1)
+  if(lo>=0)l=l.filter(r=>r.grade_low>=lo&&r.grade_low!==-1);
+  if(hi<state.grades.length-2)l=l.filter(r=>r.grade_low<=hi);
   if(state.sort==="new")l=[...l].sort((a,b)=>b.created_at.localeCompare(a.created_at));
   else l=[...l].sort((a,b)=>b.grade_low-a.grade_low||b.created_at.localeCompare(a.created_at));
   return l;
@@ -185,9 +197,16 @@ function paint(){
   });
 }
 
-function updateMinLab(){
-  const g=gi(state.min);
-  $("#minLab").textContent=(g==="all")?"All grades":(g+" or harder");
+function gn(i){const g=gi(i);return g==="all"?"Any":g}
+function updateRangeUI(){
+  $("#minLab").textContent=gn(state.min);
+  $("#maxLab").textContent=gn(state.max);
+  $("#rangeLab").textContent=(gn(state.min)==="Any")?"all grades":`${gn(state.min)}–${gn(state.max)}`;
+  // draw fill between thumbs
+  const n=state.grades.length-1;
+  const pL=(state.min/n)*100, pR=100-(state.max/n)*100;
+  $("#dFill").style.left=pL+"%";
+  $("#dFill").style.width=(100-pL-pR)+"%";
 }
 
 function sc(s){return s>0?"pos":(s<0?"neg":"")}
@@ -229,8 +248,10 @@ $("#sortseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   paint();
 });
 $("#wall").onchange=e=>{state.wall=e.target.value;paint()};
-$("#min").oninput=e=>{state.min=+e.target.value;updateMinLab()};
-$("#min").onchange=e=>{state.min=+e.target.value;updateMinLab();paint()};
+$("#min").oninput=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI()};
+$("#min").onchange=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI();paint()};
+$("#max").oninput=e=>{let v=+e.target.value;if(v<state.min)v=state.min;state.max=v;e.target.value=v;updateRangeUI()};
+$("#max").onchange=e=>{let v=+e.target.value;if(v<state.min)v=state.min;state.max=v;e.target.value=v;updateRangeUI();paint()};
 $("#sUp").onclick=()=>state.cur&&vote(state.cur.id,1);
 $("#sDn").onclick=()=>state.cur&&vote(state.cur.id,-1);
 
