@@ -24,18 +24,15 @@ _FULL = V_ORDER + [
 ]
 _FULL_IDX = {g: i for i, g in enumerate(_FULL)}
 
-# canonical wall sections (the three the gym uses) + common aliases
+# canonical wall sections (Left / Middle / Right) + common aliases
 WALL_ALIASES = {
-    "left": "left vertical", "left wall": "left vertical",
-    "left vertical": "left vertical", "vertical": "left vertical",
-    "vertical (left)": "left vertical", "left (vertical)": "left vertical",
-    "middle": "middle overhang", "middle overhang": "middle overhang",
-    "overhang": "middle overhang", "overhang wall": "middle overhang",
-    "cave": "middle overhang",
-    "overhang (middle)": "middle overhang", "middle (overhang)": "middle overhang",
-    "right": "right slab", "right wall": "right slab",
-    "right slab": "right slab", "slab": "right slab",
-    "slab (right)": "right slab", "right (slab)": "right slab",
+    "left": "Left", "left wall": "Left", "left vertical": "Left",
+    "vertical": "Left", "vertical (left)": "Left", "left (vertical)": "Left",
+    "middle": "Middle", "middle overhang": "Middle", "overhang": "Middle",
+    "overhang wall": "Middle", "cave": "Middle",
+    "overhang (middle)": "Middle", "middle (overhang)": "Middle",
+    "right": "Right", "right wall": "Right", "right slab": "Right",
+    "slab": "Right", "slab (right)": "Right", "right (slab)": "Right",
 }
 
 # token-ish grade regex: VB, V0..V17, optional +, optional range.
