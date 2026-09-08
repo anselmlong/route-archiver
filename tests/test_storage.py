@@ -1,7 +1,7 @@
 """Caption parser + Storage CRUD/ratings/ticks tests."""
 import pytest
 
-from storage import GradeError, parse_caption
+from storage import GradeError, WILD_LOW, parse_caption
 
 
 # --------------------------------------------------------------------------- #
@@ -270,3 +270,95 @@ def test_stats_reports_active_and_retired_breakdown(storage):
     storage.add_route(name="B", grade="V1", grade_low=1)
     storage.retire_route(a["id"])
     assert storage.stats() == {"total": 2, "active": 1, "retired": 1}
+
+
+# --------------------------------------------------------------------------- #
+# Storage: personal logbook + leaderboards
+# --------------------------------------------------------------------------- #
+def test_user_ticked_routes_ordered_newest_tick_first(storage):
+    a = storage.add_route(name="A", grade="V1", grade_low=1)
+    b = storage.add_route(name="B", grade="V2", grade_low=2)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.toggle_tick(b["id"], tg_user_id=1, tg_user_name="Bob")
+    names = [r["name"] for r in storage.user_ticked_routes(1)]
+    assert names == ["B", "A"]
+
+
+def test_user_ticked_routes_only_returns_that_users_ticks(storage):
+    a = storage.add_route(name="A", grade="V1", grade_low=1)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    assert storage.user_ticked_routes(2) == []
+
+
+def test_user_ticked_routes_includes_retired_excludes_deleted(storage):
+    a = storage.add_route(name="Retired", grade="V1", grade_low=1)
+    b = storage.add_route(name="Deleted", grade="V1", grade_low=1)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.toggle_tick(b["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.retire_route(a["id"])
+    storage.delete_route(b["id"])
+    names = [r["name"] for r in storage.user_ticked_routes(1)]
+    assert names == ["Retired"]
+
+
+def test_user_ticked_routes_untick_removes_it(storage):
+    a = storage.add_route(name="A", grade="V1", grade_low=1)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")  # toggles off
+    assert storage.user_ticked_routes(1) == []
+
+
+def test_leaderboard_climbers_ranked_by_tick_count_with_hardest_grade(storage):
+    a = storage.add_route(name="A", grade="V2", grade_low=2)
+    b = storage.add_route(name="B", grade="V6", grade_low=7)
+    c = storage.add_route(name="C", grade="V1", grade_low=1)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.toggle_tick(b["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.toggle_tick(c["id"], tg_user_id=2, tg_user_name="Cat")
+    board = storage.leaderboard_climbers()
+    assert board[0] == {"tg_user_id": 1, "tg_user_name": "Bob", "ticks": 2, "hardest_grade": "V6"}
+    assert board[1] == {"tg_user_id": 2, "tg_user_name": "Cat", "ticks": 1, "hardest_grade": "V1"}
+
+
+def test_leaderboard_climbers_ignores_wildcard_grade_for_hardest(storage):
+    wild = storage.add_route(name="Wild", grade="V?", grade_low=WILD_LOW)
+    graded = storage.add_route(name="Graded", grade="V3", grade_low=3)
+    storage.toggle_tick(wild["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.toggle_tick(graded["id"], tg_user_id=1, tg_user_name="Bob")
+    board = storage.leaderboard_climbers()
+    assert board[0]["hardest_grade"] == "V3"
+
+
+def test_leaderboard_climbers_excludes_deleted_route_ticks(storage):
+    a = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.delete_route(a["id"])
+    assert storage.leaderboard_climbers() == []
+
+
+def test_leaderboard_climbers_respects_limit(storage):
+    for i in range(5):
+        r = storage.add_route(name=f"R{i}", grade="V1", grade_low=1)
+        storage.toggle_tick(r["id"], tg_user_id=i, tg_user_name=f"U{i}")
+    assert len(storage.leaderboard_climbers(limit=2)) == 2
+
+
+def test_leaderboard_setters_ranked_by_routes_set(storage):
+    storage.add_route(name="A", grade="V1", grade_low=1, setter_name="Sam", setter_id=10)
+    storage.add_route(name="B", grade="V1", grade_low=1, setter_name="Sam", setter_id=10)
+    storage.add_route(name="C", grade="V1", grade_low=1, setter_name="Ana", setter_id=20)
+    board = storage.leaderboard_setters()
+    assert board[0] == {"setter_id": 10, "setter_name": "Sam", "routes_set": 2}
+    assert board[1] == {"setter_id": 20, "setter_name": "Ana", "routes_set": 1}
+
+
+def test_leaderboard_setters_excludes_deleted_routes(storage):
+    r = storage.add_route(name="A", grade="V1", grade_low=1, setter_name="Sam", setter_id=10)
+    storage.delete_route(r["id"])
+    assert storage.leaderboard_setters() == []
+
+
+def test_leaderboard_setters_includes_retired_routes(storage):
+    r = storage.add_route(name="A", grade="V1", grade_low=1, setter_name="Sam", setter_id=10)
+    storage.retire_route(r["id"])
+    assert storage.leaderboard_setters()[0]["routes_set"] == 1

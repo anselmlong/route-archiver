@@ -23,7 +23,7 @@ from telegram.ext import (
     filters,
 )
 
-from storage import GradeError, Storage, _norm_wall, parse_caption
+from storage import GradeError, Storage, WILD_LOW, _norm_wall, parse_caption
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("routes-bot")
@@ -288,6 +288,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "`Crack Line V4`\n"
         "Post it in the topic for its wall (left / overhang / slab) and I'll\n"
         "tag the wall automatically.\n\n"
+        "/mine — your own send history\n"
+        "/leaderboard — top climbers & setters\n\n"
         "Tap for the full collection.",
         parse_mode="Markdown",
         reply_markup=_app_link({}),
@@ -317,6 +319,65 @@ async def cmd_routes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(f"\n…and {len(routes)-30} more. Open the collection for all.")
     stats = storage.stats()
     lines.append(f"\n_{stats['active']} active · {stats['retired']} retired all-time_")
+    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+def _hardest(routes: list[dict]):
+    """(grade, grade_low) of the hardest route in a list, ignoring
+    wildcard-graded ones. None if there's nothing gradeable."""
+    hardest_grade, hardest_low = None, WILD_LOW
+    for r in routes:
+        if r["grade_low"] > hardest_low:
+            hardest_low, hardest_grade = r["grade_low"], r["grade"]
+    return hardest_grade
+
+
+async def cmd_mine(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Your own send history: /mine."""
+    user = update.effective_user
+    if not user:
+        return
+    routes = storage.user_ticked_routes(user.id)
+    if not routes:
+        await update.effective_message.reply_text(
+            "No ticks yet — open a route in the collection and mark it sent.",
+            reply_markup=_app_link({}),
+        )
+        return
+    hardest = _hardest(routes)
+    lines = [f"*{len(routes)} sends* · hardest {hardest}"]
+    for r in routes[:20]:
+        suffix = " _(retired)_" if r.get("retired_at") else ""
+        lines.append(_route_line(r) + suffix)
+    if len(routes) > 20:
+        lines.append(f"\n…and {len(routes)-20} more. Open the collection for your full list.")
+    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+_MEDALS = ["🥇", "🥈", "🥉"]
+
+
+async def cmd_leaderboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Top climbers (sends + hardest grade) and top setters: /leaderboard."""
+    climbers = storage.leaderboard_climbers(10)
+    setters = storage.leaderboard_setters(10)
+
+    lines = ["🏆 *Top climbers*"]
+    if not climbers:
+        lines.append("No ticks yet.")
+    for i, c in enumerate(climbers):
+        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
+        name = _md_escape(c["tg_user_name"] or f"user_{c['tg_user_id']}")
+        lines.append(f"{rank} {name} — {c['ticks']} sends · hardest {c['hardest_grade']}")
+
+    lines.append("\n🔨 *Top setters*")
+    if not setters:
+        lines.append("No routes set yet.")
+    for i, s in enumerate(setters):
+        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
+        name = _md_escape(s["setter_name"] or f"setter_{s['setter_id']}")
+        lines.append(f"{rank} {name} — {s['routes_set']} routes set")
+
     await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
@@ -553,6 +614,8 @@ def run():
     app = Application.builder().token(BOT_TOKEN).post_init(_set_menu_button).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("routes", cmd_routes))
+    app.add_handler(CommandHandler("mine", cmd_mine))
+    app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
     app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("reset", cmd_reset))

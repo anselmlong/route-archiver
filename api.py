@@ -191,6 +191,55 @@ def meta():
     }
 
 
+@app.get("/api/me")
+def me(request: Request, tg: str | None = None):
+    """The calling Telegram user's own send history (personal logbook).
+
+    Requires a valid initData (via `tg` query param or header) -- unlike
+    /api/routes this has no anonymous fallback, since there's no "someone
+    else's" history to show. Routes are shaped identically to /api/routes
+    rows (same rating/tick aggregate fields) so the frontend can reuse the
+    same card + detail-sheet rendering.
+    """
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    try:
+        uid, name = validate_init_data(raw)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+
+    rows = storage.user_ticked_routes(uid)
+    storage.attach_ratings_and_ticks(rows, tg_user_id=uid)
+    for r in rows:
+        r.pop("photo_path", None)
+
+    pyramid: dict[str, int] = {}
+    hardest_grade, hardest_low = None, -1
+    for r in rows:
+        pyramid[r["grade"]] = pyramid.get(r["grade"], 0) + 1
+        if r["grade_low"] > hardest_low:
+            hardest_low, hardest_grade = r["grade_low"], r["grade"]
+
+    return {
+        "name": name,
+        "routes": rows,
+        "count": len(rows),
+        "grade_pyramid": pyramid,
+        "hardest_grade": hardest_grade,
+    }
+
+
+@app.get("/api/leaderboard")
+def leaderboard(limit: int = 10):
+    """Public leaderboards -- top climbers (send count + hardest grade)
+    and top setters (routes archived). No auth needed, this is aggregate
+    data, not anyone's personal record."""
+    limit = max(1, min(limit, 50))
+    return {
+        "climbers": storage.leaderboard_climbers(limit),
+        "setters": storage.leaderboard_setters(limit),
+    }
+
+
 @app.get("/api/photo/{route_id}")
 def photo(route_id: int):
     r = storage.get_route(route_id)

@@ -2,6 +2,7 @@
 driven with headless Chromium via Playwright. No mocking of fetch() — this
 exercises the actual client/server contract."""
 import base64
+import json
 import socket
 import threading
 import time
@@ -48,6 +49,7 @@ def live_server(tmp_path, monkeypatch):
 
     r3 = s.add_route(name="Stripped Slab", grade="V2", grade_low=2, wall="Left",
                       photo_path=str(photo))
+    s.toggle_tick(r3["id"], tg_user_id=1, tg_user_name="A")
     s.retire_route(r3["id"])
 
     port = _free_port()
@@ -79,6 +81,33 @@ def page(live_server):
         pg = browser.new_page()
         pg.goto(live_server["base_url"] + "/")
         pg.wait_for_selector(".card")
+        yield pg
+        browser.close()
+
+
+@pytest.fixture
+def authed_page(live_server):
+    """Same live server, with state.initData set directly to a validly
+    signed initData for tg_user_id=1 (who the fixture already gave a
+    rating + two ticks, one on a retired route) -- exercises the Mine/
+    rating/tick flows that require a verified initData.
+
+    Setting state.initData post-load (rather than faking
+    window.Telegram.WebApp before the page's script runs) sidesteps a race
+    with the real telegram-web-app.js CDN script, which -- if it happens
+    to be reachable from this sandbox -- would load after any injected
+    window.Telegram and overwrite it. Top-level `const state` in the
+    page's inline script is still reachable by identifier from any script
+    evaluated in the same page realm, even though it's not a `window`
+    property.
+    """
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1, first_name="Tester")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        pg.evaluate(f"state.initData = {json.dumps(raw)}")
         yield pg
         browser.close()
 
@@ -257,3 +286,66 @@ def test_retired_badge_shown_in_detail_sheet(page):
     page.locator(".card", has_text="Crack Line").click()
     page.wait_for_selector(".scrim.open")
     assert not page.locator("#sretired").is_visible()
+
+
+# --------------------------------------------------------------------------- #
+# Mine (personal logbook) view
+# --------------------------------------------------------------------------- #
+def test_mine_view_without_telegram_prompts_open_message(page):
+    page.locator('[data-view="mine"]').click()
+    page.wait_for_selector("#empty:not([hidden])")
+    assert "Open via Telegram" in page.locator("#empty").inner_text()
+    assert page.locator(".card").count() == 0
+
+
+def test_mine_view_shows_my_ticks_with_stats(authed_page):
+    authed_page.locator('[data-view="mine"]').click()
+    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    names = set(authed_page.locator(".nm").all_inner_texts())
+    assert names == {"Crack Line", "Stripped Slab"}
+    stats = authed_page.locator("#mineStats").inner_text()
+    assert "2 sends" in stats
+    assert "hardest V4" in stats
+
+
+def test_mine_view_shows_retired_badge_on_retired_tick(authed_page):
+    authed_page.locator('[data-view="mine"]').click()
+    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    retired_card = authed_page.locator(".card", has_text="Stripped Slab")
+    assert retired_card.locator(".retired").count() == 1
+    active_card = authed_page.locator(".card", has_text="Crack Line")
+    assert active_card.locator(".retired").count() == 0
+
+
+def test_switching_between_views_toggles_correct_panels(authed_page):
+    authed_page.locator('[data-view="mine"]').click()
+    authed_page.wait_for_selector("#mineStats:not([hidden])")
+    assert authed_page.locator("#browseControls").is_hidden()
+
+    authed_page.locator('[data-view="board"]').click()
+    authed_page.wait_for_selector("#board:not([hidden])")
+    assert authed_page.locator("#mineStats").is_hidden()
+    assert authed_page.locator("#grid").is_hidden()
+
+    authed_page.locator('[data-view="browse"]').click()
+    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    assert authed_page.locator("#browseControls").is_visible()
+    assert authed_page.locator("#board").is_hidden()
+
+
+# --------------------------------------------------------------------------- #
+# Leaderboard view
+# --------------------------------------------------------------------------- #
+def test_leaderboard_view_shows_climber_ranking(authed_page):
+    authed_page.locator('[data-view="board"]').click()
+    authed_page.wait_for_selector(".brow")
+    text = authed_page.locator("#board").inner_text()
+    assert "Top climbers" in text
+    # the leaderboard reports each tick's tg_user_name as stored at tick
+    # time ("A" in the fixture), not the display name from the current
+    # initData ("Tester") -- a climber's history keeps the name they had
+    # when they sent it
+    assert "🥇 A" in text
+    assert "2 sends" in text
+    # no route in the fixture has a setter_name, so the setter board is empty
+    assert "No routes set yet" in text

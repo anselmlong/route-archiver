@@ -242,3 +242,72 @@ def test_cmd_routes_lists_active_only_by_default(bot_module):
     text = msg.replies[0]["text"]
     assert "Still Up" in text
     assert "Retired One" not in text
+
+
+# --------------------------------------------------------------------------- #
+# /mine (personal logbook) -- open to any user, not just admins
+# --------------------------------------------------------------------------- #
+def test_cmd_mine_no_ticks_shows_hint(bot_module):
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_mine(update, FakeCtx()))
+    assert "No ticks yet" in msg.replies[0]["text"]
+
+
+def test_cmd_mine_lists_own_ticks_with_hardest_grade(bot_module):
+    a = _seed(bot_module, name="Easy", grade="V2", grade_low=2)
+    b = _seed(bot_module, name="Hard", grade="V6", grade_low=7)
+    other = _seed(bot_module, name="Not mine", grade="V8", grade_low=9)
+    bot_module.storage.toggle_tick(a["id"], tg_user_id=NON_ADMIN_ID, tg_user_name="Climber")
+    bot_module.storage.toggle_tick(b["id"], tg_user_id=NON_ADMIN_ID, tg_user_name="Climber")
+    bot_module.storage.toggle_tick(other["id"], tg_user_id=999, tg_user_name="Someone Else")
+
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_mine(update, FakeCtx()))
+    text = msg.replies[0]["text"]
+    assert "2 sends" in text
+    assert "hardest V6" in text
+    assert "Easy" in text and "Hard" in text
+    assert "Not mine" not in text
+
+
+def test_cmd_mine_marks_retired_routes(bot_module):
+    r = _seed(bot_module, name="Stripped")
+    bot_module.storage.toggle_tick(r["id"], tg_user_id=NON_ADMIN_ID, tg_user_name="Climber")
+    bot_module.storage.retire_route(r["id"])
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_mine(update, FakeCtx()))
+    assert "(retired)" in msg.replies[0]["text"]
+
+
+# --------------------------------------------------------------------------- #
+# /leaderboard -- also open to any user
+# --------------------------------------------------------------------------- #
+def test_cmd_leaderboard_empty_state(bot_module):
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_leaderboard(update, FakeCtx()))
+    text = msg.replies[0]["text"]
+    assert "No ticks yet" in text
+    assert "No routes set yet" in text
+
+
+def test_cmd_leaderboard_ranks_climbers_and_setters(bot_module):
+    a = _seed(bot_module, name="A", grade="V2", grade_low=2, setter_name="Sam", setter_id=10)
+    b = _seed(bot_module, name="B", grade="V6", grade_low=7, setter_name="Sam", setter_id=10)
+    c = _seed(bot_module, name="C", grade="V1", grade_low=1, setter_name="Ana", setter_id=20)
+    s = bot_module.storage
+    s.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    s.toggle_tick(b["id"], tg_user_id=1, tg_user_name="Bob")
+    s.toggle_tick(c["id"], tg_user_id=2, tg_user_name="Cat")
+
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_leaderboard(update, FakeCtx()))
+    text = msg.replies[0]["text"]
+    assert "🥇 Bob — 2 sends · hardest V6" in text
+    assert "🥈 Cat — 1 sends · hardest V1" in text
+    assert "🥇 Sam — 2 routes set" in text
+    assert "🥈 Ana — 1 routes set" in text

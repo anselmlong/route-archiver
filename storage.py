@@ -496,6 +496,66 @@ class Storage:
             ).fetchone()
         return row["c"]
 
+    # ---- personal logbook + leaderboards ---------------------------------
+    def user_ticked_routes(self, tg_user_id):
+        """A climber's own send history, newest tick first. Includes
+        retired routes -- a route coming down in a reset shouldn't erase
+        the fact that you climbed it -- but never deleted (mis-posted)
+        ones."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT r.* FROM ticks t JOIN routes r ON r.id = t.route_id "
+                "WHERE t.tg_user_id = ? AND r.deleted = 0 "
+                "ORDER BY t.created_at DESC, t.id DESC",
+                (tg_user_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def leaderboard_climbers(self, limit=10):
+        """Top climbers by tick count, with each climber's hardest send.
+        Aggregated in Python over a single fetch rather than fancier SQL --
+        a gym's whole tick history is a few hundred rows at most, and this
+        stays easy to follow. Wildcard-graded sends (grade_low -1) never
+        count as "hardest"."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT t.tg_user_id, t.tg_user_name, t.created_at, "
+                "r.grade, r.grade_low FROM ticks t "
+                "JOIN routes r ON r.id = t.route_id WHERE r.deleted = 0"
+            ).fetchall()
+        by_user = {}
+        for row in rows:
+            uid = row["tg_user_id"]
+            e = by_user.setdefault(uid, {
+                "tg_user_id": uid, "tg_user_name": row["tg_user_name"],
+                "ticks": 0, "hardest_grade": None, "_hardest_low": WILD_LOW,
+                "_latest": row["created_at"],
+            })
+            e["ticks"] += 1
+            if row["created_at"] >= e["_latest"]:
+                e["tg_user_name"] = row["tg_user_name"]
+                e["_latest"] = row["created_at"]
+            if row["grade_low"] > e["_hardest_low"]:
+                e["_hardest_low"] = row["grade_low"]
+                e["hardest_grade"] = row["grade"]
+        ranked = sorted(by_user.values(), key=lambda e: e["ticks"], reverse=True)[:limit]
+        for e in ranked:
+            del e["_hardest_low"], e["_latest"]
+        return ranked
+
+    def leaderboard_setters(self, limit=10):
+        """Top setters by number of routes archived (active + retired,
+        never deleted mis-posts)."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT setter_id, MAX(setter_name) setter_name, COUNT(*) c FROM routes "
+                "WHERE deleted = 0 AND setter_id IS NOT NULL "
+                "GROUP BY setter_id ORDER BY c DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [{"setter_id": r["setter_id"], "setter_name": r["setter_name"],
+                  "routes_set": r["c"]} for r in rows]
+
     def attach_ratings_and_ticks(self, routes, tg_user_id=None):
         """Mutate route dicts in place: avg/count/my_rating, tick_count/my_tick."""
         if not routes:

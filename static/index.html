@@ -40,6 +40,7 @@
 
   /* cards */
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin-top:12px}
+  .grid[hidden]{display:none}
   .card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;transition:transform .06s}
   .card:active{transform:scale(.98)}
   .card img{width:100%;display:block;background:var(--panel)}
@@ -55,6 +56,23 @@
   .tickcount{color:var(--tick);font-size:11px}
   .badges{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}
   .empty{padding:48px 0;text-align:center;color:var(--muted);font-size:13.5px}
+
+  /* mine (personal logbook) */
+  .mine-stats{margin:12px 0 4px}
+  .mrow{font-size:13.5px;color:var(--text);margin-bottom:10px}
+  .pyr{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .pg{width:34px;font-size:12px;color:var(--muted);text-align:right;flex-shrink:0}
+  .pbar{flex:1;height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+  .pbar div{height:100%;background:var(--accent)}
+  .pc{width:20px;font-size:11.5px;color:var(--muted);text-align:right;flex-shrink:0}
+
+  /* leaderboard */
+  .board{margin-top:8px}
+  .board h3{font-size:14px;margin:16px 0 8px;color:var(--text)}
+  .board h3:first-child{margin-top:2px}
+  .brow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;background:var(--panel);border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:13.5px}
+  .brow .who{font-weight:600}
+  .brow .what{color:var(--muted);font-size:12.5px}
 
   /* sheet */
   .scrim{position:fixed;inset:0;background:rgba(8,10,13,.78);z-index:30;display:none}
@@ -97,26 +115,37 @@
 </header>
 
 <main class="wrap" id="main">
-  <div class="toolbar">
-    <div class="seg" id="sortseg">
-      <button data-sort="grade" class="on">Grade</button>
-      <button data-sort="new">New</button>
-    </div>
-    <div class="seg" id="statusseg">
-      <button data-status="active" class="on">On the wall</button>
-      <button data-status="all">All-time</button>
-    </div>
-    <select id="wall"><option value="">All walls</option></select>
+  <div class="seg" id="viewseg">
+    <button data-view="browse" class="on">Browse</button>
+    <button data-view="mine">Mine</button>
+    <button data-view="board">Leaderboard</button>
   </div>
 
-  <div class="filters">
-    <div class="gradelab"><span id="minLab">VB</span><span id="rangeLab" style="color:var(--text);font-weight:650"></span><span id="maxLab">V8+</span></div>
-    <div class="range-wrap">
-      <div class="rail"><div class="fill" id="dFill"></div></div>
-      <input type="range" id="min" min="0" max="1" value="0" step="1">
-      <input type="range" id="max" min="0" max="1" value="1" step="1">
+  <div id="browseControls">
+    <div class="toolbar">
+      <div class="seg" id="sortseg">
+        <button data-sort="grade" class="on">Grade</button>
+        <button data-sort="new">New</button>
+      </div>
+      <div class="seg" id="statusseg">
+        <button data-status="active" class="on">On the wall</button>
+        <button data-status="all">All-time</button>
+      </div>
+      <select id="wall"><option value="">All walls</option></select>
+    </div>
+
+    <div class="filters">
+      <div class="gradelab"><span id="minLab">VB</span><span id="rangeLab" style="color:var(--text);font-weight:650"></span><span id="maxLab">V8+</span></div>
+      <div class="range-wrap">
+        <div class="rail"><div class="fill" id="dFill"></div></div>
+        <input type="range" id="min" min="0" max="1" value="0" step="1">
+        <input type="range" id="max" min="0" max="1" value="1" step="1">
+      </div>
     </div>
   </div>
+
+  <div class="mine-stats" id="mineStats" hidden></div>
+  <div class="board" id="board" hidden></div>
 
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden>No routes yet.</div>
@@ -150,7 +179,8 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const state={routes:[],sort:"grade",wall:"",status:"active",min:0,max:1,grades:[],cur:null,initData:""};
+const state={routes:[],sort:"grade",wall:"",status:"active",min:0,max:1,grades:[],cur:null,initData:"",
+  view:"browse",curList:[],mine:null,board:null};
 
 (function tg(){
   if(window.Telegram&&window.Telegram.WebApp){
@@ -218,7 +248,20 @@ function filtered(){
 }
 
 function paint(){
-  const list=filtered();
+  renderGrid(filtered());
+}
+
+function findRoutes(id){
+  // the same route can exist as separate object instances in state.routes
+  // (browse) and state.mine.routes (personal logbook) -- return every copy
+  // so a rating/tick updates whichever one is actually on screen
+  const out=state.routes.filter(x=>x.id===id);
+  if(state.mine)out.push(...state.mine.routes.filter(x=>x.id===id));
+  return out;
+}
+
+function renderGrid(list){
+  state.curList=list;
   $("#count").textContent=list.length+" route"+(list.length===1?"":"s");
   const grid=$("#grid"), empty=$("#empty");
   empty.hidden=!!list.length;
@@ -237,7 +280,7 @@ function paint(){
     </div>`).join("");
 
   grid.querySelectorAll(".card").forEach(c=>{
-    const r=state.routes.find(x=>x.id===Number(c.dataset.id));
+    const r=list.find(x=>x.id===Number(c.dataset.id));
     c.querySelector(".nm").textContent=r.name;
     c.onclick=e=>{if(e.target.closest("button"))return;open(r)};
   });
@@ -253,6 +296,87 @@ function updateRangeUI(){
   $("#dFill").style.width=(100-pL-pR)+"%";
 }
 
+/* ---- view switching: Browse / Mine / Leaderboard ---- */
+function setView(v){
+  if(v===state.view)return;
+  state.view=v;
+  $("#viewseg").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
+  $("#browseControls").hidden=v!=="browse";
+  $("#mineStats").hidden=v!=="mine";
+  $("#board").hidden=v!=="board";
+  $("#grid").hidden=v==="board";
+  $("#empty").hidden=true;
+  if(v==="browse"){
+    $("#empty").textContent="No routes yet.";
+    $("#count").textContent="";
+    paint();
+  }else if(v==="mine"){
+    loadMine();
+  }else if(v==="board"){
+    $("#count").textContent="";
+    loadBoard();
+  }
+}
+
+async function loadMine(){
+  if(!state.initData){
+    $("#grid").innerHTML="";
+    $("#empty").hidden=false;
+    $("#empty").textContent="Open via Telegram to see your send history.";
+    $("#count").textContent="";
+    return;
+  }
+  $("#sub").textContent="loading your ticks…";
+  try{
+    state.mine=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
+    $("#sub").textContent="tap a card for details";
+    renderMine();
+  }catch(e){
+    $("#sub").textContent="tap a card for details";
+    $("#grid").innerHTML="";
+    $("#empty").hidden=false;
+    $("#empty").textContent="Couldn't load your ticks. Try again shortly.";
+  }
+}
+
+function renderMine(){
+  const m=state.mine;
+  if(!m)return;
+  const bars=Object.entries(m.grade_pyramid||{})
+    .sort((a,b)=>state.grades.indexOf(b[0])-state.grades.indexOf(a[0]));
+  const max=Math.max(1,...bars.map(b=>b[1]));
+  $("#mineStats").innerHTML=m.count
+    ?`<div class="mrow"><b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></div>`+
+      bars.map(([g,c])=>`<div class="pyr"><span class="pg">${esc(g)}</span><div class="pbar"><div style="width:${c/max*100}%"></div></div><span class="pc">${c}</span></div>`).join("")
+    :"";
+  $("#count").textContent="";
+  $("#empty").textContent="No ticks yet — open a route and mark it sent.";
+  renderGrid(m.routes);
+}
+
+async function loadBoard(){
+  $("#board").innerHTML='<div class="empty">loading…</div>';
+  try{
+    state.board=await fetch("/api/leaderboard").then(x=>x.json());
+    renderBoard();
+  }catch(e){
+    $("#board").innerHTML='<div class="empty">Couldn\'t load the leaderboard.</div>';
+  }
+}
+
+function renderBoard(){
+  const b=state.board;
+  if(!b)return;
+  const medal=i=>["🥇","🥈","🥉"][i]||(i+1)+".";
+  const climbers=b.climbers.length
+    ?b.climbers.map((c,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(c.tg_user_name||"climber")}</span><span class="what">${c.ticks} sends · ${esc(c.hardest_grade||"—")}</span></div>`).join("")
+    :'<div class="empty">No ticks yet.</div>';
+  const setters=b.setters.length
+    ?b.setters.map((s,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(s.setter_name||"setter")}</span><span class="what">${s.routes_set} routes set</span></div>`).join("")
+    :'<div class="empty">No routes set yet.</div>';
+  $("#board").innerHTML=`<h3>🏆 Top climbers</h3>${climbers}<h3>🔨 Top setters</h3>${setters}`;
+}
+
 /* ---- sheet buttons ---- */
 async function rate(id,val){
   if(!state.initData){alert("Open via Telegram to rate (one rating per account).");return}
@@ -260,9 +384,8 @@ async function rate(id,val){
     const res=await fetch(`/api/rate/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json();
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
-    const r=state.routes.find(x=>x.id===id);
-    if(r&&d.avg!==undefined){r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating}
-    paint();
+    if(d.avg!==undefined)findRoutes(id).forEach(r=>{r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating});
+    renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
   }catch(e){alert("Couldn't save your rating. Check your connection and try again.")}
 }
@@ -273,9 +396,8 @@ async function tick(id,val){
     const res=await fetch(`/api/tick/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json();
     if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
-    const r=state.routes.find(x=>x.id===id);
-    if(r&&d.ticked!==undefined){r.my_tick=d.ticked?1:0;r.tick_count=d.count}
-    paint();
+    if(d.ticked!==undefined)findRoutes(id).forEach(r=>{r.my_tick=d.ticked?1:0;r.tick_count=d.count});
+    renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
   }catch(e){alert("Couldn't save your tick. Check your connection and try again.")}
 }
@@ -285,8 +407,7 @@ async function setTickGrade(id){
   if(!g||!state.initData)return;
   try{
     await fetch(`/api/tick/${id}/grade`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggested_grade:g,init_data:state.initData})});
-    const r=state.routes.find(x=>x.id===id);
-    if(r)r.my_suggested_grade=g;
+    findRoutes(id).forEach(r=>r.my_suggested_grade=g);
   }catch(e){}
 }
 
@@ -334,6 +455,7 @@ function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt
 
 /* ---- wire up ---- */
 $("#scrim").onclick=closeSheet;
+$("#viewseg").querySelectorAll("button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
 $("#sortseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   state.sort=b.dataset.sort;
   $("#sortseg").querySelectorAll("button").forEach(x=>x.classList.remove("on"));b.classList.add("on");

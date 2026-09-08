@@ -284,6 +284,92 @@ def test_tick_grade_404_for_missing_route(client, api_module):
 
 
 # --------------------------------------------------------------------------- #
+# GET /api/me (personal logbook)
+# --------------------------------------------------------------------------- #
+def test_me_requires_auth(client, api_module):
+    r = client.get("/api/me")
+    assert r.status_code == 401
+
+
+def test_me_rejects_invalid_init_data(client, api_module):
+    r = client.get("/api/me", params={"tg": "garbage"})
+    assert r.status_code == 401
+
+
+def test_me_returns_only_my_ticks_shaped_like_routes(client, api_module):
+    mine = _seed_route(api_module, name="Mine", grade="V4", grade_low=5)
+    other = _seed_route(api_module, name="Not mine", grade="V6", grade_low=7)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    api_module.storage.toggle_tick(mine["id"], tg_user_id=1, tg_user_name="A")
+    api_module.storage.toggle_tick(other["id"], tg_user_id=2, tg_user_name="B")
+
+    r = client.get("/api/me", params={"tg": raw})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 1
+    assert [x["name"] for x in body["routes"]] == ["Mine"]
+    row = body["routes"][0]
+    assert "my_tick" in row and row["my_tick"] == 1
+    assert "photo_path" not in row
+
+
+def test_me_includes_retired_routes_and_grade_pyramid(client, api_module):
+    a = _seed_route(api_module, name="A", grade="V4", grade_low=5)
+    b = _seed_route(api_module, name="B", grade="V6", grade_low=7)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    api_module.storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="A")
+    api_module.storage.toggle_tick(b["id"], tg_user_id=1, tg_user_name="A")
+    api_module.storage.retire_route(a["id"])
+
+    body = client.get("/api/me", params={"tg": raw}).json()
+    assert body["count"] == 2
+    assert body["hardest_grade"] == "V6"
+    assert body["grade_pyramid"] == {"V4": 1, "V6": 1}
+    names = {x["name"] for x in body["routes"]}
+    assert names == {"A", "B"}
+
+
+def test_me_empty_when_no_ticks(client, api_module):
+    _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    body = client.get("/api/me", params={"tg": raw}).json()
+    assert body == {"name": "Tester", "routes": [], "count": 0, "grade_pyramid": {}, "hardest_grade": None}
+
+
+# --------------------------------------------------------------------------- #
+# GET /api/leaderboard
+# --------------------------------------------------------------------------- #
+def test_leaderboard_is_public_no_auth_needed(client, api_module):
+    r = client.get("/api/leaderboard")
+    assert r.status_code == 200
+    assert r.json() == {"climbers": [], "setters": []}
+
+
+def test_leaderboard_ranks_climbers_by_ticks_and_setters_by_routes(client, api_module):
+    a = _seed_route(api_module, name="A", grade="V4", grade_low=5, setter_name="Sam", setter_id=10)
+    b = _seed_route(api_module, name="B", grade="V6", grade_low=7, setter_name="Sam", setter_id=10)
+    c = _seed_route(api_module, name="C", grade="V2", grade_low=2, setter_name="Ana", setter_id=20)
+    s = api_module.storage
+    s.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    s.toggle_tick(b["id"], tg_user_id=1, tg_user_name="Bob")
+    s.toggle_tick(c["id"], tg_user_id=2, tg_user_name="Cat")
+
+    body = client.get("/api/leaderboard").json()
+    assert body["climbers"][0] == {"tg_user_id": 1, "tg_user_name": "Bob", "ticks": 2, "hardest_grade": "V6"}
+    assert body["setters"][0] == {"setter_id": 10, "setter_name": "Sam", "routes_set": 2}
+
+
+def test_leaderboard_limit_is_clamped(client, api_module):
+    for i in range(5):
+        _seed_route(api_module, name=f"R{i}", setter_name=f"S{i}", setter_id=i)
+    r = client.get("/api/leaderboard", params={"limit": 0})
+    assert r.status_code == 200
+    r2 = client.get("/api/leaderboard", params={"limit": 9999})
+    assert r2.status_code == 200
+    assert len(r2.json()["setters"]) == 5
+
+
+# --------------------------------------------------------------------------- #
 # misc
 # --------------------------------------------------------------------------- #
 def test_healthz(client):

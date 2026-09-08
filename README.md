@@ -30,6 +30,13 @@ they just keep posting route pics.
   - retired routes keep their ratings/ticks and stay in the mini-app's
     "All-time" view (toggle next to "On the wall") — a climber's send
     history doesn't vanish just because the route came down.
+- **Personal logbook** — `/mine` (bot) or the mini-app's "Mine" tab shows
+  your own send history: total sends, hardest grade, a grade pyramid, and
+  the actual routes (including retired ones you climbed before they came
+  down).
+- **Leaderboards** — `/leaderboard` (bot) or the mini-app's "Leaderboard"
+  tab: top climbers by send count (with each one's hardest grade) and top
+  setters by routes archived.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |
