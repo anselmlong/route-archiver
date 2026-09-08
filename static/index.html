@@ -156,17 +156,28 @@ const state={routes:[],sort:"grade",wall:"",min:0,max:1,grades:[],cur:null,initD
 })();
 
 async function load(){
-  const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
-  const r=await fetch("/api/routes"+q).then(x=>x.json());
-  const k=await fetch("/api/meta").then(x=>x.json());
-  state.routes=r.routes; state.grades=["all",...k.grades];
-  const n=state.grades.length-1;
-  state.min=0; state.max=n;
-  $("#min").min=0; $("#min").max=n; $("#min").value=0;
-  $("#max").min=0; $("#max").max=n; $("#max").value=n;
-  setWallOptions(k.walls);
-  updateRangeUI();
-  paint();
+  $("#empty").hidden=true;
+  $("#sub").textContent="loading routes…";
+  try{
+    const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
+    const r=await fetch("/api/routes"+q).then(x=>x.json());
+    const k=await fetch("/api/meta").then(x=>x.json());
+    state.routes=r.routes; state.grades=["all",...k.grades];
+    const n=state.grades.length-1;
+    state.min=0; state.max=n;
+    $("#min").min=0; $("#min").max=n; $("#min").value=0;
+    $("#max").min=0; $("#max").max=n; $("#max").value=n;
+    setWallOptions(k.walls);
+    updateRangeUI();
+    $("#sub").textContent="tap a card for details";
+    paint();
+  }catch(e){
+    $("#sub").textContent="tap a card for details";
+    const empty=$("#empty");
+    empty.hidden=false;
+    empty.innerHTML='Couldn\'t load routes. <a href="#" id="retry" style="color:var(--accent)">Retry</a>';
+    $("#retry").onclick=ev=>{ev.preventDefault();load()};
+  }
 }
 
 function setWallOptions(walls){
@@ -205,7 +216,7 @@ function paint(){
   empty.hidden=!!list.length;
   grid.innerHTML=list.map(r=>`
     <div class="card" data-id="${r.id}">
-      <img loading="lazy" src="/api/photo/${r.id}" alt="">
+      <img loading="lazy" src="/api/photo/${r.id}" alt="" onerror="this.style.visibility='hidden'">
       <div class="info">
         <div class="nm"></div>
         <div class="meta"><span class="tag">${esc(r.grade)}</span>${r.wall?`<span class="wall">· ${esc(r.wall)}</span>`:""}</div>
@@ -245,7 +256,7 @@ async function rate(id,val){
     if(r&&d.avg!==undefined){r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating}
     paint();
     if(state.cur&&state.cur.id===id)refreshSheet();
-  }catch(e){}
+  }catch(e){alert("Couldn't save your rating. Check your connection and try again.")}
 }
 
 async function tick(id,val){
@@ -258,7 +269,7 @@ async function tick(id,val){
     if(r&&d.ticked!==undefined){r.my_tick=d.ticked?1:0;r.tick_count=d.count}
     paint();
     if(state.cur&&state.cur.id===id)refreshSheet();
-  }catch(e){}
+  }catch(e){alert("Couldn't save your tick. Check your connection and try again.")}
 }
 
 async function setTickGrade(id){

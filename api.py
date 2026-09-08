@@ -11,10 +11,12 @@ import os
 import time
 import urllib.parse
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from storage import V_ORDER, Storage
 
@@ -82,8 +84,26 @@ def validate_init_data(raw: str, max_age: int = 86400):
 
 def _identity(body, request):
     """Resolve + verify the acting Telegram user from a request."""
-    raw = body.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
+    raw = body.init_data or request.headers.get("X-Telegram-Init-Data", "")
     return validate_init_data(raw)  # raises ValueError
+
+
+# --------------------------------------------------------------------------- #
+# request bodies (validated at the boundary; handlers below can trust shapes)
+# --------------------------------------------------------------------------- #
+class RateBody(BaseModel):
+    value: Literal[1, 2, 3, 4, 5]
+    init_data: str | None = None
+
+
+class TickBody(BaseModel):
+    suggested_grade: str | None = None
+    init_data: str | None = None
+
+
+class TickGradeBody(BaseModel):
+    suggested_grade: str | None = None
+    init_data: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -95,9 +115,8 @@ def index():
 
 
 @app.get("/api/routes")
-def routes(grade: str | None = None, wall: str | None = None,
-           tg: str | None = None,  # type: ignore[assignment]  # optional initData
-           request: "Request" = None):  # type: ignore[assignment]  # fastapi injects
+def routes(request: Request, grade: str | None = None, wall: str | None = None,
+           tg: str | None = None):  # tg: optional initData query param
     """Return routes optionally filtered by minimum grade or exact wall.
 
     Ratings/ticks are attached; my_rating / my_tick are personalised when a
@@ -119,12 +138,8 @@ def routes(grade: str | None = None, wall: str | None = None,
 
 
 @app.post("/api/rate/{route_id}")
-async def rate(route_id: int, request: Request):
+async def rate(route_id: int, body: RateBody, request: Request):
     """Set (1-5) or clear a user's star rating on a route."""
-    body = await request.json()
-    value = body.get("value")
-    if value not in (1, 2, 3, 4, 5):
-        return JSONResponse(status_code=400, content={"error": "value must be 1-5"})
     try:
         uid, name = _identity(body, request)
     except ValueError as e:
@@ -132,34 +147,32 @@ async def rate(route_id: int, request: Request):
         return JSONResponse(status_code=401, content={"error": str(e)})
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
-    return storage.set_rating(route_id, uid, name, value)
+    return storage.set_rating(route_id, uid, name, body.value)
 
 
 @app.post("/api/tick/{route_id}")
-async def tick(route_id: int, request: Request):
+async def tick(route_id: int, body: TickBody, request: Request):
     """Toggle a user's ascent tick on/off (optionally with a suggested grade)."""
-    body = await request.json()
     try:
         uid, name = _identity(body, request)
     except ValueError as e:
         return JSONResponse(status_code=401, content={"error": str(e)})
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
-    suggested = body.get("suggested_grade")
-    return storage.toggle_tick(route_id, uid, name, suggested)
+    return storage.toggle_tick(route_id, uid, name, body.suggested_grade)
 
 
 @app.put("/api/tick/{route_id}/grade")
-async def tick_grade(route_id: int, request: Request):
+async def tick_grade(route_id: int, body: TickGradeBody, request: Request):
     """Update the suggested grade on an already-existing tick."""
-    body = await request.json()
     try:
         uid, _ = _identity(body, request)
     except ValueError as e:
         return JSONResponse(status_code=401, content={"error": str(e)})
-    suggested = body.get("suggested_grade")
-    storage.set_tick_grade(route_id, uid, suggested)
-    return {"ticked": True, "suggested_grade": suggested}
+    if not storage.get_route(route_id):
+        return JSONResponse(status_code=404, content={"error": "route not found"})
+    storage.set_tick_grade(route_id, uid, body.suggested_grade)
+    return {"ticked": True, "suggested_grade": body.suggested_grade}
 
 
 @app.get("/api/meta")

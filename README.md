@@ -48,3 +48,17 @@ python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
 sudo cp routes-bot.service routes-api.service /etc/systemd/system/
 sudo systemctl enable --now routes-bot routes-api
 ```
+
+## Testing
+```bash
+./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/python -m playwright install chromium   # first run only
+./venv/bin/pytest tests/
+```
+`tests/test_storage.py` / `tests/test_api.py` cover the caption parser, grade
+clamping, ratings/ticks, and every API endpoint (auth via signed Telegram
+initData, 401/404/422 error paths) against an isolated SQLite DB.
+`tests/test_frontend.py` drives the real static frontend against a live
+FastAPI instance with headless Chromium (Playwright) — filtering, sorting,
+the detail sheet, XSS-escaping of user content, and rating/tick gating
+outside of Telegram.

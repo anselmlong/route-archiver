@@ -6,8 +6,10 @@ confirmation linking to the mini-app. Provides admin CRUD (edit/delete/override)
 
 Runs as a systemd service (see route-archiver.service). No cron, no Hermes.
 """
+import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -61,10 +63,27 @@ def _is_admin(uid) -> bool:
     return uid in ADMINS
 
 
+_MD_SPECIAL = re.compile(r"([_*`\[])")
+
+
+def _md_escape(s) -> str:
+    """Escape legacy-Markdown special chars in free-form user text.
+
+    Route names, walls, descriptions and setter names all come from
+    Telegram captions / display names we don't control; an unbalanced
+    `_`/`*`/`` ` ``/`[` in any of them makes parse_mode="Markdown" reject
+    the whole message, so escape before interpolating into any Markdown
+    message.
+    """
+    if not s:
+        return ""
+    return _MD_SPECIAL.sub(r"\\\1", str(s))
+
+
 def _route_line(r: dict) -> str:
-    wall = f" · {r['wall']}" if r.get("wall") else ""
-    setter = f" by {r['setter_name']}" if r.get("setter_name") else ""
-    return f"🧗 *{r['name']}* — {r['grade']}{wall}{setter}"
+    wall = f" · {_md_escape(r['wall'])}" if r.get("wall") else ""
+    setter = f" by {_md_escape(r['setter_name'])}" if r.get("setter_name") else ""
+    return f"🧗 *{_md_escape(r['name'])}* — {r['grade']}{wall}{setter}"
 
 
 def _app_link(r: dict) -> InlineKeyboardMarkup:
@@ -102,7 +121,6 @@ TOPIC_WALLS_FILE = BASE_DIR / "data" / "topic_walls.json"
 
 
 def _load_json(path):
-    import json
     try:
         return json.loads(path.read_text())
     except Exception:
@@ -110,7 +128,6 @@ def _load_json(path):
 
 
 def _save_json(path, data):
-    import json
     try:
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(data))
@@ -130,16 +147,9 @@ def _topic_wall_map(chat_id: int, thread_id: int):
 def _remember_topic(chat_id: int, thread_id: int, name: str):
     if not name or not thread_id:
         return
-    import json
-    try:
-        data = json.loads(TOPIC_NAMES_FILE.read_text()) if TOPIC_NAMES_FILE.exists() else {}
-    except Exception:
-        data = {}
+    data = _load_json(TOPIC_NAMES_FILE)
     data.setdefault(str(chat_id), {})[str(thread_id)] = name
-    try:
-        TOPIC_NAMES_FILE.write_text(json.dumps(data))
-    except Exception as e:
-        log.warning("couldn't save topic name: %s", e)
+    _save_json(TOPIC_NAMES_FILE, data)
 
 
 # --------------------------------------------------------------------------- #
@@ -153,6 +163,9 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     # ignore the bot's own reposts (avoid reply loops)
     if update.effective_user and update.effective_user.id == ctx.bot.id:
+        return
+    # only archive from the configured group, if one is set
+    if CHAT_ID and msg.chat.id != CHAT_ID:
         return
 
     caption = msg.caption or ""
@@ -215,12 +228,12 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ]
     kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)]])
 
-    desc = f"\n📝 {route['description']}" if route.get("description") else ""
+    desc = f"\n📝 {_md_escape(route['description'])}" if route.get("description") else ""
     await msg.reply_text(
-        f"✅ Archived *{route['name']}* — {route['grade']}"
-        + (f" · {route['wall']}" if route.get("wall") else "")
+        f"✅ Archived *{_md_escape(route['name'])}* — {route['grade']}"
+        + (f" · {_md_escape(route['wall'])}" if route.get("wall") else "")
         + desc
-        + (f"\n🧗 Set by {route['setter_name']}" if route.get("setter_name") else "")
+        + (f"\n🧗 Set by {_md_escape(route['setter_name'])}" if route.get("setter_name") else "")
         + "\nTap to open the full collection.",
         parse_mode="Markdown",
         reply_markup=kb,
@@ -335,7 +348,6 @@ async def cmd_setchat(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # record chat + group name in a small config file for /chat
     cfg = BASE_DIR / "data" / "chat.json"
     cfg.parent.mkdir(exist_ok=True)
-    import json
     data = {"chat_id": chat.id, "title": getattr(chat, "title", None)}
     cfg.write_text(json.dumps(data))
     await update.effective_message.reply_text(
@@ -353,7 +365,8 @@ async def _delete_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_
         InlineKeyboardButton("Cancel", callback_data=f"del_no:{route_id}"),
     ]])
     await update.callback_query.edit_message_text(
-        f"Delete *{route['name']}* ({route['grade']})?", parse_mode="Markdown", reply_markup=kb
+        f"Delete *{_md_escape(route['name'])}* ({route['grade']})?",
+        parse_mode="Markdown", reply_markup=kb
     )
 
 
@@ -403,8 +416,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     ctx.user_data.pop("editing_route", None)
     await update.effective_message.reply_text(
-        f"✅ Updated to *{r['name']}* — {r['grade']}"
-        + (f" · {r['wall']}" if r.get("wall") else ""),
+        f"✅ Updated to *{_md_escape(r['name'])}* — {r['grade']}"
+        + (f" · {_md_escape(r['wall'])}" if r.get("wall") else ""),
         parse_mode="Markdown",
     )
 
