@@ -10,13 +10,15 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent / "data" / "routes.db"
 
 # V-scale ordering for sorting. Higher index = harder. Capped at V8+ per the gym.
-# 'V?' / 'V' are wildcard routes with no grade — sort them lowest (unknown).
+# Wildcard routes (V? / V) are NOT in this scale — they get grade_low -1 below
+# everything, so they sort last and never shift the real grade indices.
 V_ORDER = [
-    "V?", "V", "VB", "V0", "V0+", "V1", "V1+", "V2", "V2+", "V3", "V3+",
+    "VB", "V0", "V0+", "V1", "V1+", "V2", "V2+", "V3", "V3+",
     "V4", "V4+", "V5", "V5+", "V6", "V6+", "V7", "V7+", "V8", "V8+",
 ]
 _V_IDX = {g: i for i, g in enumerate(V_ORDER)}
 MAX_IDX = _V_IDX["V8+"]  # anything harder than this gets clamped to V8+
+WILD_LOW = -1  # sort index for V? / V wildcard routes
 
 # fuller accepted scale for parsing; grades above V8+ are clamped, not rejected
 _FULL = V_ORDER + [
@@ -143,10 +145,10 @@ def _split_wall(after: str):
 def parse_caption(caption: str) -> dict:
     """Parse a free-form route caption.
 
-    Handles 'Route / V4+ / left vertical', 'juggy one - V4', bare 'V4', and
-    'fun route (V3-4) (dont break pls)'. Returns dict with keys: name, grade,
-    grade_low, wall (canonical or None), description (str or None). Raises
-    GradeError if no V-grade found.
+    Handles 'Route / V4+ / left vertical', 'juggy one - V4', bare 'V4',
+    wildcards ('Mystery V?', 'Wildcard V'), and 'fun route (V3-4)'. Returns
+    dict with keys: name, grade, grade_low, wall (canonical or None),
+    description (str or None). Raises GradeError if no V-grade found.
     """
     if not caption:
         raise GradeError("no caption")
@@ -155,7 +157,12 @@ def parse_caption(caption: str) -> dict:
     if not m:
         raise GradeError("no V-grade found")
 
-    grade_display, grade_low = _parse_grade_token(m.group(0))
+    token = _norm_grade(m.group(0))
+    if token in ("V?", "V"):
+        # wildcard route — no grade, sorts below everything
+        grade_display, grade_low = token, WILD_LOW
+    else:
+        grade_display, grade_low = _parse_grade_token(token)
 
     # name = the leading label before the grade; wall + description from the tail
     name = _clean_name(caption[: m.start()])
@@ -260,9 +267,11 @@ class Storage:
         if not updates:
             return self.get_route(route_id)
         if "grade" in updates and "grade_low" not in updates:
-            updates["grade"], updates["grade_low"] = _parse_grade_token(
-                str(updates["grade"])
-            )
+            g = _norm_grade(str(updates["grade"]))
+            if g in ("V?", "V"):
+                updates["grade"], updates["grade_low"] = g, WILD_LOW
+            else:
+                updates["grade"], updates["grade_low"] = _parse_grade_token(g)
         sets = ", ".join(f"{k}=?" for k in updates)
         params = list(updates.values()) + [route_id]
         with self._lock, self._connect() as conn:

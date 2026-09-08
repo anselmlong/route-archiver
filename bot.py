@@ -80,31 +80,51 @@ def _app_link(r: dict) -> InlineKeyboardMarkup:
 
 
 async def _topic_wall(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, thread_id: int):
-    """Return the canonical wall for a forum topic based on its persisted name.
+    """Return the wall for a forum topic.
 
-    The Bot API has no getForumTopics method (it 404s), so we can't query topic
-    names on demand. Instead we capture the topic name from the
-    forum_topic_created / forum_topic_edited service messages (persisted in
-    data/topic_names.json) and map it through WALL_ALIASES. The "General" topic
-    (thread_id == chat_id) is not a named wall.
+    Priority: an explicit wall set via /wall in that topic → a name captured
+    from forum_topic_created/edited service messages → None. (The Bot API has no
+    getForumTopics method, so we can't query topic names on demand.)
     """
     if not thread_id or thread_id == chat_id:
         return None  # General topic (or no topic)
+
+    mapped = _topic_wall_map(chat_id, thread_id)
+    if mapped:
+        return mapped
 
     title = _load_topic_name(chat_id, thread_id)
     return _norm_wall(title) if title else None
 
 
 TOPIC_NAMES_FILE = BASE_DIR / "data" / "topic_names.json"
+TOPIC_WALLS_FILE = BASE_DIR / "data" / "topic_walls.json"
+
+
+def _load_json(path):
+    import json
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return {}
+
+
+def _save_json(path, data):
+    import json
+    try:
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(data))
+    except Exception as e:
+        log.warning("couldn't save %s: %s", path.name, e)
 
 
 def _load_topic_name(chat_id: int, thread_id: int):
-    try:
-        import json
-        data = json.loads(TOPIC_NAMES_FILE.read_text())
-    except Exception:
-        data = {}
-    return data.get(str(chat_id), {}).get(str(thread_id))
+    return _load_json(TOPIC_NAMES_FILE).get(str(chat_id), {}).get(str(thread_id))
+
+
+def _topic_wall_map(chat_id: int, thread_id: int):
+    """Explicit wall set for a topic via /wall (most reliable source)."""
+    return _load_json(TOPIC_WALLS_FILE).get(str(chat_id), {}).get(str(thread_id))
 
 
 def _remember_topic(chat_id: int, thread_id: int, name: str):
@@ -275,6 +295,37 @@ async def _require_admin(update: Update, uid) -> bool:
     return True
 
 
+async def cmd_wall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Bind the current forum topic to a wall: /wall left | middle | right.
+
+    Admin runs this INSIDE the desired topic once. Persists chat→thread→wall,
+    which is the most reliable wall source (doesn't depend on topic names).
+    """
+    user = update.effective_user
+    if not user or not _is_admin(user.id):
+        await update.effective_message.reply_text("⛔ admins only.")
+        return
+    chat = update.effective_chat
+    if not chat or chat.type not in ("supergroup", "group", "channel"):
+        await update.effective_message.reply_text("Run this inside the topic you want to map.")
+        return
+    thread_id = getattr(update.effective_message, "message_thread_id", None) or chat.id
+    args = (ctx.args or [])
+    if not args:
+        await update.effective_message.reply_text("Usage: /wall left | middle | right")
+        return
+    raw = " ".join(args).strip().lower()
+    canon = {"left": "Left", "middle": "Middle", "right": "Right",
+             "l": "Left", "m": "Middle", "r": "Right"}.get(raw)
+    if not canon:
+        await update.effective_message.reply_text("Wall must be left, middle or right.")
+        return
+    data = _load_json(TOPIC_WALLS_FILE)
+    data.setdefault(str(chat.id), {})[str(thread_id)] = canon
+    _save_json(TOPIC_WALLS_FILE, data)
+    await update.effective_message.reply_text(f"✅ Topic -> *{canon}* wall. Photos here will tag {canon}.", parse_mode="Markdown")
+
+
 async def cmd_setchat(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user or not _is_admin(user.id):
@@ -397,6 +448,7 @@ def run():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("routes", cmd_routes))
     app.add_handler(CommandHandler("app", cmd_app))
+    app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("setchat", cmd_setchat))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CallbackQueryHandler(on_callback))

@@ -3,275 +3,244 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>NUS USC Routes</title>
+<title>Routes</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root{
-    --bg:#0f1115; --panel:#171a21; --panel2:#1f232c; --border:#2a2f3a;
-    --text:#e8eaf0; --muted:#9aa2b0; --accent:#f59e0b; --accent2:#38bdf8;
+    --bg:#0f1115; --panel:#171b21; --line:#262b34; --text:#e6e8ec; --muted:#8b93a1;
+    --accent:#f0a020; --up:#2fbf6f; --down:#e0525f;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:40px}
-  header{position:sticky;top:0;z-index:10;background:linear-gradient(180deg,var(--bg) 80%,transparent);padding:16px 16px 8px}
-  h1{font-size:1.3rem;letter-spacing:-.02em}
-  h1 span{color:var(--accent2)}
-  .sub{color:var(--muted);font-size:.85rem;margin-top:2px}
-  .sortrow{display:flex;gap:8px;padding:6px 16px}
-  .sortrow select{background:var(--panel);color:var(--text);border:1px solid var(--border);
-    border-radius:10px;padding:10px 12px;font-size:.95rem;flex:1;-webkit-appearance:none;appearance:none}
-  .chips{display:flex;gap:6px;overflow-x:auto;padding:6px 16px;scrollbar-width:none}
-  .chips::-webkit-scrollbar{display:none}
-  .chip{flex:0 0 auto;background:var(--panel2);color:var(--muted);border:1px solid var(--border);
-    border-radius:999px;padding:6px 14px;font-size:.82rem;cursor:pointer;white-space:nowrap}
-  .chip.on{background:var(--accent);color:#131415;border-color:var(--accent);font-weight:600}
-  .wallrow{display:flex;gap:8px;padding:6px 16px}
-  .wallrow select{background:var(--panel);color:var(--text);border:1px solid var(--border);
-    border-radius:10px;padding:10px 12px;font-size:.95rem;flex:1;-webkit-appearance:none;appearance:none}
-  main{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:12px 16px}
-  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;
-    display:flex;flex-direction:column;box-shadow:0 2px 6px rgba(0,0,0,.25);cursor:pointer;transition:transform .08s}
-  .card:active{transform:scale(.98)}
-  .card img{width:100%;height:auto;object-fit:contain;background:var(--panel2);display:block}
-  .card .meta{padding:10px;display:flex;flex-direction:column;gap:3px}
-  .card .name{font-weight:600;font-size:.92rem;line-height:1.2}
-  .card .grade{color:var(--accent);font-weight:700;font-size:.9rem}
-  .card .wall{color:var(--muted);font-size:.78rem}
-  .card .desc{color:var(--muted);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  /* voting */
-  .up,.down{background:none;border:1px solid var(--border);color:var(--muted);width:38px;height:34px;
-    font-size:1rem;border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
-    transition:background .1s}
-  .up.on,.up:hover{background:var(--accent);color:#131415;border-color:var(--accent)}
-  .down.on,.down:hover{background:#e0525f;color:#fff;border-color:#e0525f}
-  .score{min-width:28px;text-align:center;font-weight:700;font-size:1.02rem}
-  .score.pos{color:var(--accent)} .score.neg{color:#e0525f}
-  .voterow{display:flex;align-items:center;gap:8px;margin-top:2px}
-  .empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:40px 0}
-  .count{color:var(--muted);font-size:.8rem;padding:2px 16px 0}
-  .topbar{display:flex;justify-content:space-between;align-items:center}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  button,input,select{font:inherit}
+  .wrap{max-width:760px;margin:0 auto;padding:16px 16px 56px}
 
-  /* detail modal */
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(2px);
-    z-index:20;display:none;align-items:flex-end;justify-content:center}
-  .overlay.open{display:flex}
-  .sheet{background:var(--panel);width:100%;max-width:560px;border-radius:20px 20px 0 0;
-    max-height:92vh;overflow-y:auto;animation:up .18s ease}
-  @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
-  .sheet img{width:100%;max-height:62vh;object-fit:contain;display:block;background:var(--panel2)}
-  .sheet .body{padding:16px}
-  .sheet h2{font-size:1.25rem;letter-spacing:-.01em}
-  .sheet .badges{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
-  .badge{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
-    padding:5px 10px;font-size:.85rem;display:flex;align-items:center;gap:5px}
-  .badge.grade{color:#131415;background:var(--accent);border-color:var(--accent);font-weight:700}
-  .sheet .desc{color:var(--muted);font-size:.92rem;line-height:1.4;margin:14px 0 2px}
-  .sheet .setter{color:var(--muted);font-size:.88rem;margin-top:8px}
-  .sheet .date{color:var(--muted);font-size:.78rem;margin-top:4px}
-  .close{position:sticky;top:0;float:right;margin:10px 10px -40px 0;z-index:1;
-    background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:999px;
-    width:34px;height:34px;font-size:1rem;cursor:pointer}
+  header{position:sticky;top:0;z-index:10;background:linear-gradient(180deg,var(--bg) 82%,transparent);padding:14px 16px 10px}
+  .brand{font-size:17px;font-weight:650;letter-spacing:-.01em;color:var(--text)}
+  .count{color:var(--muted);font-size:12.5px;margin-left:8px}
+  .sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+
+  /* toolbar */
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel)}
+  .seg button{border:0;background:transparent;color:var(--muted);padding:8px 13px;font-size:13px;cursor:pointer}
+  .seg button.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
+  select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:13.5px}
+
+  /* grade range slider */
+  .range{display:flex;flex-direction:column;gap:2px;margin:6px 0 2px}
+  .range .labels{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px}
+  .range input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:24px;background:transparent;pointer-events:none}
+  .range input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);pointer-events:all;cursor:pointer}
+  .range input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);pointer-events:all;cursor:pointer}
+  .rangelabels{font-size:12px;color:var(--muted)}
+
+  /* cards */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin-top:12px}
+  .card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;transition:transform .06s}
+  .card:active{transform:scale(.98)}
+  .card img{width:100%;display:block;background:var(--panel)}
+  .info{padding:9px 11px;display:flex;flex-direction:column;gap:3px}
+  .nm{font-size:14px;font-weight:600;line-height:1.25}
+  .meta{display:flex;gap:7px;flex-wrap:wrap}
+  .tag{font-size:12px;color:var(--accent);font-weight:700}
+  .wall{font-size:11.5px;color:var(--muted)}
+  .desc{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .votes{display:flex;align-items:center;gap:6px;margin-top:2px}
+  .vbtn{background:transparent;border:1px solid var(--line);border-radius:8px;width:30px;height:28px;font-size:13px;line-height:1;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .vbtn.up.on{background:var(--up);color:#04130a;border-color:var(--up)}
+  .vbtn.down.on{background:var(--down);color:#fff;border-color:var(--down)}
+  .score{min-width:24px;text-align:center;font-weight:650;font-size:14px}
+  .score.pos{color:var(--up)} .score.neg{color:var(--down)}
+  .empty{padding:48px 0;text-align:center;color:var(--muted);font-size:13.5px}
+
+  /* sheet */
+  .scrim{position:fixed;inset:0;background:rgba(8,10,13,.78);z-index:30;display:none}
+  .scrim.open{display:block}
+  .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);max-height:92vh;overflow:auto;z-index:31;animation:rise .16s ease}
+  @keyframes rise{from{transform:translateY(26px);opacity:.6}to{transform:translateY(0);opacity:1}}
+  .sheet .wrap{padding:16px}
+  .sheet img{width:100%;border-radius:10px;margin-bottom:14px}
+  .rg{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:4px}
+  .rg span{font-size:13px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 10px}
+  .rg span.g{color:#151008;background:var(--accent);border-color:var(--accent);font-weight:700}
+  .sheet h2{font-size:18px;letter-spacing:-.01em;margin-top:4px}
+  .dd{color:var(--muted);font-size:13.5px;line-height:1.5;margin-top:10px}
+  .sv{display:flex;align-items:center;gap:6px;margin-top:2px}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:12px}
 </style>
 </head>
 <body>
 <header>
-  <div class="topbar">
-    <h1>🧗 NUS USC <span>Routes</span></h1>
-    <div class="count" id="count"></div>
-  </div>
-  <div class="sub" id="subline">Tap a grade to filter · tap a route for details</div>
+  <div class="brand">≡&nbsp;Routes <span class="count" id="count"></span></div>
+  <div class="sub" id="sub">tap a card for details</div>
 </header>
 
-<div class="sortrow">
-  <select id="sort">
-    <option value="grade">Sorted: hardest first</option>
-    <option value="new">Sorted: newest first</option>
-  </select>
-</div>
-<div class="chips" id="chips"></div>
-<div class="wallrow">
-  <select id="wall"><option value="">All walls</option></select>
-</div>
-
-<main id="grid"></main>
-
-<div class="overlay" id="overlay">
-  <div class="sheet">
-    <button class="close" id="close">✕</button>
-    <img id="dimg" alt="">
-    <div class="body">
-      <h2 id="dname"></h2>
-      <div class="badges">
-        <span class="badge grade" id="dgrade"></span>
-        <span class="badge" id="dwall"></span>
-      </div>
-      <div class="desc" id="ddesc"></div>
-      <div class="voterow">
-        <button class="up" id="dup">▲</button>
-        <span class="score" id="dscore">0</span>
-        <button class="down" id="ddn">▼</button>
-      </div>
-      <div class="setter" id="dsetter"></div>
-      <div class="date" id="ddate"></div>
+<main class="wrap" id="main">
+  <div class="toolbar">
+    <div class="seg" id="sortseg">
+      <button data-sort="grade" class="on">Grade</button>
+      <button data-sort="new">New</button>
     </div>
+    <select id="wall"><option value="">All walls</option></select>
+  </div>
+
+  <div class="range">
+    <input type="range" id="lo" min="0" max="1" value="0" step="1">
+    <input type="range" id="hi" min="0" max="1" value="1" step="1">
+    <div class="labels"><span id="loLab"></span><span id="hiLab"></span></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>No routes yet.</div>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet">
+  <div class="wrap">
+    <img id="simg" alt="">
+    <div class="rg"><span class="g" id="sgrade"></span><span id="swall"></span></div>
+    <h2 id="sname"></h2>
+    <div class="dd" id="sdesc" hidden></div>
+    <div class="sv">
+      <button class="vbtn up" id="sUp">▲</button><span class="score" id="sScore">0</span><button class="vbtn down" id="sDn">▼</button>
+    </div>
+    <div class="foot" id="sfoot"></div>
   </div>
 </div>
 
 <script>
-const state = {routes:[], grade:"", wall:"", sort:"grade", gradeIdx:{}, cur:null, initData:""};
+const $=s=>document.querySelector(s);
+const state={routes:[],sort:"grade",wall:"",lo:0,hi:0,grades:[],cur:null,initData:""};
 
-// ---- Telegram Mini App init ----
-(function initTg(){
-  if (window.Telegram && window.Telegram.WebApp){
+(function tg(){
+  if(window.Telegram&&window.Telegram.WebApp){
     window.Telegram.WebApp.ready();
     window.Telegram.WebApp.expand();
-    window.Telegram.WebApp.setHeaderColor && window.Telegram.WebApp.setHeaderColor('#0f1115');
-    // raw initData so the server can verify the Telegram user for voting
-    if (window.Telegram.WebApp.initData) state.initData = window.Telegram.WebApp.initData;
-    const u = window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user;
-    if (u && u.first_name){
-      const el = document.getElementById('subline');
-      if (el) el.textContent = 'Hey ' + u.first_name + ' · tap a grade to filter, tap a route for details';
-    }
+    if(window.Telegram.WebApp.initData) state.initData=window.Telegram.WebApp.initData;
+    const u=window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user;
+    if(u&&u.first_name)$("#sub").textContent="hey "+u.first_name+" · tap a card for details";
   }
 })();
 
-function apiHeaders(){
-  const h = {'Content-Type':'application/json'};
-  if (state.initData) h['X-Telegram-Init-Data'] = state.initData;
-  return h;
-}
+function hdrs(){const h={"Content-Type":"application/json"};if(state.initData)h["X-Telegram-Init-Data"]=state.initData;return h}
 
 async function load(){
-  const [r,k] = await Promise.all([
-    fetch('/api/routes', {headers: apiHeaders()}).then(r=>r.json()),
-    fetch('/api/meta').then(r=>r.json())
-  ]);
-  state.routes = r.routes;
-  k.grades.forEach((g,i)=>state.gradeIdx[g]=i);
-  renderMeta(k);
-  render();
+  const r=await fetch("/api/routes",{headers:hdrs()}).then(x=>x.json());
+  const k=await fetch("/api/meta").then(x=>x.json());
+  state.routes=r.routes; state.grades=["all",...k.grades];
+  state.hi=state.grades.length-1;
+  $("#lo").max=state.hi;$("#hi").max=state.hi;
+  $("#lo").value=0;$("#hi").value=state.hi;
+  setWallOptions(k.walls);
+  paint();
 }
 
-function renderMeta(k){
-  const chipWrap = document.getElementById('chips');
-  chipWrap.innerHTML = '';
-  const allChip = document.createElement('span');
-  allChip.className = 'chip' + (state.grade==='' ? ' on':'');
-  allChip.textContent = 'All';
-  allChip.onclick = ()=>{state.grade='';renderMeta(k);render()};
-  chipWrap.appendChild(allChip);
-  k.grades.forEach(g=>{
-    const c = document.createElement('span');
-    c.className = 'chip' + (state.grade===g ? ' on':'');
-    c.textContent = g;
-    c.onclick = ()=>{state.grade = (state.grade===g)?'':g; renderMeta(k); render()};
-    chipWrap.appendChild(c);
-  });
-  const wallSel = document.getElementById('wall');
-  wallSel.innerHTML = '<option value="">All walls</option>' +
-    k.walls.map(w=>`<option value="${esc(w)}"${state.wall===w?' selected':''}>${esc(w)}</option>`).join('');
+function setWallOptions(walls){
+  const sel=$("#wall");
+  sel.innerHTML='<option value="">All walls</option>'+walls.map(w=>`<option value="${w}">${w}</option>`).join("");
 }
 
-function esc(s){return String(s ?? '').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function fmtDate(d){try{const dt=new Date(d.replace(' ','T')+'Z');return dt.toLocaleDateString(undefined,{day:'numeric',month:'short'})}catch(e){return d}}
+function gi(i){return state.grades[i]}
+function displayGrade(g){return g==="all"?"Any":g}
 
-function scoreClass(score){return score>0?'pos':(score<0?'neg':'')}
+function filtered(){
+  let l=state.routes;
+  if(state.wall)l=l.filter(r=>r.wall===state.wall);
+  const lo=gi(state.lo),hi=gi(state.hi);
+  // map selected grades to a comparable index using grade_low
+  const loIdx=state.grades.indexOf(lo)-1; // index within real scale
+  const hiIdx=state.grades.indexOf(hi)-1;
+  // special: "all" (loIdx=-1) means no lower bound; wildcards (grade_low<0)
+  if(loIdx>=0)l=l.filter(r=>r.grade_low>=loIdx);
+  if(hiIdx<state.grades.length-2)l=l.filter(r=>r.grade_low<=hiIdx);
+  if(state.sort==="new")l=[...l].sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  else l=[...l].sort((a,b)=>b.grade_low-a.grade_low||b.created_at.localeCompare(a.created_at));
+  return l;
+}
 
-function render(){
-  const grid = document.getElementById('grid');
-  let list = state.routes;
-  if(state.wall) list = list.filter(r=>r.wall===state.wall);
-  if(state.grade){
-    const idx = state.gradeIdx[state.grade];
-    if(idx>=0) list = list.filter(r=>r.grade_low >= idx);
-  }
-  if(state.sort==='new') list = [...list].sort((a,b)=> b.created_at.localeCompare(a.created_at));
-  else list = [...list].sort((a,b)=> b.grade_low-a.grade_low || b.created_at.localeCompare(a.created_at));
-
-  document.getElementById('count').textContent = list.length + ' routes';
-  document.getElementById('wall').value = state.wall ?? '';
-  if(!list.length){grid.innerHTML='<div class="empty">No routes here yet.</div>';return}
-  grid.innerHTML = list.map(r=>`
+function paint(){
+  const list=filtered();
+  $("#count").textContent=list.length+" route"+(list.length===1?"":"s");
+  const grid=$("#grid"),
+        empty=$("#empty");
+  empty.hidden=!!list.length;
+  grid.innerHTML=list.map(r=>`
     <div class="card" data-id="${r.id}">
-      <img loading="lazy" src="/api/photo/${r.id}" alt="${esc(r.name)}">
-      <div class="meta">
-        <div class="name">${esc(r.name)}</div>
-        <div class="grade">${esc(r.grade)}</div>
-        ${r.wall?`<div class="wall">${esc(r.wall)}</div>`:''}
-        ${r.description?`<div class="desc">${esc(r.description)}</div>`:''}
-        <div class="voterow">
-          <button class="up${r.my_vote===1?' on':''}" data-vote="1" data-id="${r.id}">▲</button>
-          <span class="score ${scoreClass(r.score)}">${r.score}</span>
-          <button class="down${r.my_vote===-1?' on':''}" data-vote="-1" data-id="${r.id}">▼</button>
+      <img loading="lazy" src="/api/photo/${r.id}" alt="">
+      <div class="info">
+        <div class="nm"></div>
+        <div class="meta"><span class="tag">${esc(r.grade)}</span>${r.wall?`<span class="wall">· ${esc(r.wall)}</span>`:""}</div>
+        ${r.description?`<div class="desc">${esc(r.description)}</div>`:""}
+        <div class="votes">
+          <button class="vbtn up${r.my_vote===1?" on":""}" data-v="1">▲</button>
+          <span class="score ${sc(r.score)}">${r.score}</span>
+          <button class="vbtn down${r.my_vote===-1?" on":""}" data-v="-1">▼</button>
         </div>
       </div>
-    </div>`).join('');
-  grid.querySelectorAll('.card').forEach(card=>{
-    card.onclick = (e)=>{
-      if (e.target.matches('button')) return; // don't open detail when voting
-      const id = Number(card.dataset.id);
-      const r = state.routes.find(x=>x.id===id);
-      if(r) openDetail(r);
-    };
+    </div>`).join("");
+
+  grid.querySelectorAll(".card").forEach(c=>{
+    const r=state.routes.find(x=>x.id===Number(c.dataset.id));
+    c.querySelector(".nm").textContent=r.name;
+    c.onclick=e=>{if(e.target.closest("button"))return;open(r)};
   });
-  grid.querySelectorAll('button.up,button.down').forEach(btn=>{
-    const id = Number(btn.dataset.id);
-    const val = Number(btn.dataset.vote);
-    btn.onclick = (e)=>{ e.stopPropagation(); castVote(id,val); };
+  grid.querySelectorAll(".vbtn").forEach(b=>{
+    b.onclick=e=>{e.stopPropagation();vote(Number(b.closest(".card").dataset.id),Number(b.dataset.v))};
   });
-  if (state.cur){
-    const fresh = state.routes.find(x=>x.id===state.cur.id);
-    if (fresh) state.cur = fresh;
-  }
+  paintSlider();
 }
 
-async function castVote(route_id, value){
-  if (!state.initData){
-    alert('Open this via Telegram to vote (so each account gets one vote).');
-    return;
-  }
+function paintSlider(){
+  const loV=displayGrade(gi(state.lo)),hiV=displayGrade(gi(state.hi));
+  $("#loLab").textContent=loV+"+";
+  $("#hiLab").textContent="≤ "+hiV;
+}
+
+function sc(s){return s>0?"pos":(s<0?"neg":"")}
+
+async function vote(id,val){
+  if(!state.initData){alert("Open via Telegram to vote (one vote per account).");return}
   try{
-    const res = await fetch(`/api/vote/${route_id}`, {method:'POST', headers: apiHeaders(), body: JSON.stringify({value})});
-    const d = await res.json();
-    if (res.status===401){ alert('Vote not verified. Reopen the collection from Telegram.'); return; }
-    const r = state.routes.find(x=>x.id===route_id);
-    if (r && d.score!==undefined){ r.upvotes=d.upvotes; r.downvotes=d.downvotes; r.score=d.score; r.my_vote=d.value; }
-    render();
-    if (state.cur && state.cur.id===route_id) openDetail(state.cur);
-  }catch(err){
-    alert('Could not save vote.');
-  }
+    const res=await fetch(`/api/vote/${id}`,{method:"POST",headers:hdrs(),body:JSON.stringify({value:val})});
+    const d=await res.json();
+    if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
+    const r=state.routes.find(x=>x.id===id);
+    if(r&&d.score!==undefined){r.upvotes=d.upvotes;r.downvotes=d.downvotes;r.score=d.score;r.my_vote=d.value}
+    paint();
+    if(state.cur&&state.cur.id===id)open(state.cur);
+  }catch(err){}
 }
 
-function openDetail(r){
-  state.cur = r;
-  document.getElementById('dimg').src = `/api/photo/${r.id}`;
-  document.getElementById('dimg').alt = r.name;
-  document.getElementById('dname').textContent = r.name;
-  document.getElementById('dgrade').textContent = r.grade;
-  const wallEl = document.getElementById('dwall');
-  if(r.wall){wallEl.style.display='flex'; wallEl.textContent='🧱 '+r.wall}
-  else wallEl.style.display='none';
-  const descEl = document.getElementById('ddesc');
-  descEl.style.display = r.description ? 'block' : 'none';
-  if (r.description) descEl.textContent = r.description;
-  document.getElementById('dsetter').textContent = r.setter_name ? 'Set by '+r.setter_name : '';
-  document.getElementById('ddate').textContent = 'Added '+fmtDate(r.created_at);
-  const up = document.getElementById('dup'), dn = document.getElementById('ddn');
-  up.className = 'up' + (r.my_vote===1?' on':'');
-  dn.className = 'down' + (r.my_vote===-1?' on':'');
-  const sc = document.getElementById('dscore');
-  sc.className = 'score ' + scoreClass(r.score);
-  sc.textContent = r.score;
-  document.getElementById('overlay').classList.add('open');
+function open(r){
+  state.cur=r;
+  $("#simg").src=`/api/photo/${r.id}`;
+  $("#sgrade").textContent=r.grade;
+  const w=$("#swall");w.style.display=r.wall?"":"none";w.textContent="🧗 "+r.wall;
+  $("#sname").textContent=r.name;
+  const dd=$("#sdesc");dd.hidden=!r.description;dd.textContent=r.description;
+  const sc=$("#sScore"),su=$("#sUp"),sd=$("#sDn");
+  sc.className="score "+sc(r.score);sc.textContent=r.score;
+  su.className="vbtn up"+(r.my_vote===1?" on":"");
+  sd.className="vbtn down"+(r.my_vote===-1?" on":"");
+  $("#sfoot").textContent=((r.setter_name?"set by "+r.setter_name:""))+fmtDate(r.created_at);
+  $("#scrim").classList.add("open");
 }
+function fmtDate(d){try{const dt=new Date(d.replace(" ","T")+"Z");return dt.toLocaleDateString(undefined,{day:"numeric",month:"short"})}catch(e){return d}}
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 
-document.getElementById('close').onclick = ()=>document.getElementById('overlay').classList.remove('open');
-document.getElementById('overlay').onclick = (e)=>{ if(e.target.id==='overlay') document.getElementById('overlay').classList.remove('open') };
-document.getElementById('sort').onchange = e=>{state.sort=e.target.value; render()};
-document.getElementById('wall').onchange = e=>{state.wall=e.target.value; render()};
-document.getElementById('dup').onclick = ()=>state.cur&&castVote(state.cur.id, 1);
-document.getElementById('ddn').onclick = ()=>state.cur&&castVote(state.cur.id, -1);
+$("#scrim").onclick=()=>$("#scrim").classList.remove("open");
+$("#sortseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  state.sort=b.dataset.sort;
+  $("#sortseg").querySelectorAll("button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
+  paint();
+});
+$("#wall").onchange=e=>{state.wall=e.target.value;paint()};
+$("#lo").oninput=e=>{if(+e.target.value>state.hi)e.target.value=state.hi;state.lo=+e.target.value;paint()};
+$("#hi").oninput=e=>{if(+e.target.value<state.lo)e.target.value=state.lo;state.hi=+e.target.value;paint()};
+$("#sUp").onclick=()=>state.cur&&vote(state.cur.id,1);
+$("#sDn").onclick=()=>state.cur&&vote(state.cur.id,-1);
 
 load();
 </script>
