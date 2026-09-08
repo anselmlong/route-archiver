@@ -33,8 +33,12 @@ PHOTO_DIR.mkdir(parents=True, exist_ok=True)
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 # Comma-separated admin Telegram ids (owner override access).
 ADMINS = {int(x) for x in os.environ.get("ADMIN_IDS", "495290408").split(",") if x.strip()}
-# Mini-app base URL (public HTTPS) used in confirmation links.
+# Mini-app base URL (public HTTPS) used for the app itself.
 APP_BASE = os.environ.get("APP_BASE", "https://routes.anselmlong.com")
+# Full-screen Mini App entry. Use the t.me short link as a URL button: inline
+# `web_app` buttons are only allowed in private chats (not groups), but this
+# t.me link opens the Mini App full-screen and works everywhere.
+MINI_APP_LINK = os.environ.get("MINI_APP_LINK", "https://t.me/nuscc_routes_bot/USC_ROUTES")
 # The group the bot archives from. Empty until set (see /setchat).
 CHAT_ID = int(os.environ["CHAT_ID"]) if os.environ.get("CHAT_ID") else None
 
@@ -64,15 +68,14 @@ def _route_line(r: dict) -> str:
 
 
 def _app_link(r: dict) -> InlineKeyboardMarkup:
-    """Button that opens the collection.
+    """URL button to the full-screen Mini App (t.me short link).
 
-    URL button for now: inline web_app buttons need the domain registered via
-    @BotFather '/setmenubutton' (not /setdomain, which only covers the Login
-    Widget). Until that's done, web_app gets Button_type_invalid and crashes the
-    photo-reply handler. The full-screen Mini App is available via the menu
-    button + official t.me link.
+    Uses a plain URL button pointing at the t.me Mini App link — `web_app`
+    inline buttons are only allowed in private chats, not groups, so in group
+    chat a web_app button would crash with BUTTON_TYPE_INVALID. The t.me link
+    opens the same Mini App full-screen and works everywhere.
     """
-    kb = [[InlineKeyboardButton("🗂 Open collection", url=APP_BASE)]]
+    kb = [[InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)]]
     return InlineKeyboardMarkup(kb)
 
 
@@ -183,7 +186,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route_id}"),
         ]
     ]
-    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=APP_BASE)]])
+    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)]])
 
     await msg.reply_text(
         f"✅ Archived *{route['name']}* — {route['grade']}"
