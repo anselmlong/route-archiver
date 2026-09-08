@@ -402,12 +402,14 @@ class Storage:
             cur = conn.execute(sql, params)
             return cur.rowcount
 
-    def list_routes(self, grade=None, wall=None, status="active"):
+    def list_routes(self, grade=None, wall=None, status="active", search=None):
         """Return routes, newest-graded first, optionally filtered.
 
         status: "active" (default -- currently on the wall), "retired"
         (removed in a reset but kept for history), or "all" (both, still
         excluding admin-deleted rows).
+        search: case-insensitive substring match against route name OR
+        setter name.
         """
         sql = "SELECT * FROM routes WHERE deleted=0"
         params = []
@@ -425,6 +427,9 @@ class Storage:
         if wall:
             sql += " AND wall = ?"
             params.append(wall)
+        if search:
+            sql += " AND (name LIKE ? OR setter_name LIKE ?)"
+            params.extend([f"%{search}%", f"%{search}%"])
         sql += " ORDER BY grade_low DESC, created_at DESC, id DESC"
         with self._lock, self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()

@@ -370,3 +370,35 @@ def test_cmd_setter_shows_profile_by_partial_name(bot_module):
     assert "1 routes set" in text  # matches cmd_leaderboard's (imperfect) grammar
     assert "Crack Line" in text
     assert "Not Sam's" not in text
+
+
+# --------------------------------------------------------------------------- #
+# /search -- also open to any user
+# --------------------------------------------------------------------------- #
+def test_cmd_search_usage_without_args(bot_module):
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_search(update, FakeCtx(args=[])))
+    assert "Usage" in msg.replies[0]["text"]
+
+
+def test_cmd_search_no_matches(bot_module):
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_search(update, FakeCtx(args=["nonexistent"])))
+    assert "No routes matching" in msg.replies[0]["text"]
+
+
+def test_cmd_search_matches_name_and_setter(bot_module):
+    _seed(bot_module, name="Crack Line", grade="V4", grade_low=5, setter_name="Sam")
+    _seed(bot_module, name="Slab Master", grade="V2", grade_low=2, setter_name="Sam")
+    _seed(bot_module, name="Overhang Beast", grade="V6", grade_low=7, setter_name="Ana")
+
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_search(update, FakeCtx(args=["sam"])))
+    text = msg.replies[0]["text"]
+    assert "2 matches" in text
+    assert "Crack Line" in text
+    assert "Slab Master" in text
+    assert "Overhang Beast" not in text

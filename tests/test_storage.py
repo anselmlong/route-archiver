@@ -523,3 +523,35 @@ def test_find_setter_id_ignores_deleted_routes(storage):
     a = storage.add_route(name="A", grade="V4", grade_low=5, setter_name="Sam", setter_id=10)
     storage.delete_route(a["id"])
     assert storage.find_setter_id("sam") is None
+
+
+# --------------------------------------------------------------------------- #
+# Storage: list_routes search
+# --------------------------------------------------------------------------- #
+def test_list_routes_search_matches_name_case_insensitively(storage):
+    storage.add_route(name="Crack Line", grade="V4", grade_low=5)
+    storage.add_route(name="Slab Master", grade="V2", grade_low=2)
+    names = [r["name"] for r in storage.list_routes(search="crack")]
+    assert names == ["Crack Line"]
+
+
+def test_list_routes_search_matches_setter_name(storage):
+    storage.add_route(name="Crack Line", grade="V4", grade_low=5, setter_name="Sam Smith")
+    storage.add_route(name="Slab Master", grade="V2", grade_low=2, setter_name="Ana")
+    names = [r["name"] for r in storage.list_routes(search="sam")]
+    assert names == ["Crack Line"]
+
+
+def test_list_routes_search_no_match_returns_empty(storage):
+    storage.add_route(name="Crack Line", grade="V4", grade_low=5)
+    assert storage.list_routes(search="nonexistent") == []
+
+
+def test_list_routes_search_combines_with_status_and_wall(storage):
+    a = storage.add_route(name="Crack Line", grade="V4", grade_low=5, wall="Left")
+    b = storage.add_route(name="Crack Attack", grade="V2", grade_low=2, wall="Right")
+    storage.retire_route(b["id"])
+    active_matches = storage.list_routes(search="crack", wall="Left")
+    assert [r["name"] for r in active_matches] == ["Crack Line"]
+    all_matches = storage.list_routes(search="crack", status="all")
+    assert {r["name"] for r in all_matches} == {"Crack Line", "Crack Attack"}

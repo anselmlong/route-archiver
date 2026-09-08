@@ -208,6 +208,35 @@ def test_wall_filter_narrows_grid(page):
     assert page.locator(".card").count() == 2
 
 
+def test_search_filters_by_name(page):
+    page.fill("#search", "crack")
+    assert page.locator(".card").count() == 1
+    assert page.locator(".nm").first.inner_text() == "Crack Line"
+    page.fill("#search", "")
+    assert page.locator(".card").count() == 2
+
+
+def test_search_is_case_insensitive_with_no_match_showing_empty_state(page):
+    page.fill("#search", "CRACK")
+    assert page.locator(".card").count() == 1
+    page.fill("#search", "zzz-no-match")
+    page.wait_for_selector("#empty:not([hidden])")
+
+
+def test_search_filters_by_setter_name(setter_live_server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(setter_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        pg.fill("#search", "sam")
+        # both of Sam's routes match by setter, but only the active one
+        # shows under the default "On the wall" status
+        assert pg.locator(".card").count() == 1
+        assert pg.locator(".nm").first.inner_text() == "Crimpy Wall"
+        browser.close()
+
+
 def test_grade_range_slider_filters(page):
     # push the min-grade thumb up past V4 (index of V4 in [all,VB,V0..V8+])
     page.eval_on_selector(

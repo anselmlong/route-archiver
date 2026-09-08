@@ -27,6 +27,8 @@
   .seg button{border:0;background:transparent;color:var(--muted);padding:8px 13px;font-size:13px;cursor:pointer}
   .seg button.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
   select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:13.5px}
+  .search{width:100%;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13.5px;margin:2px 0 8px}
+  .search::placeholder{color:var(--muted)}
 
   /* dual-thumb min/max grade slider */
   .filters{display:flex;flex-direction:column;gap:4px;margin:6px 0 2px}
@@ -128,6 +130,8 @@
   </div>
 
   <div id="browseControls">
+    <input type="search" id="search" class="search" placeholder="Search by name or setter…">
+
     <div class="toolbar">
       <div class="seg" id="sortseg">
         <button data-sort="grade" class="on">Grade</button>
@@ -188,7 +192,7 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const state={routes:[],sort:"grade",wall:"",status:"active",min:0,max:1,grades:[],cur:null,initData:"",
+const state={routes:[],sort:"grade",wall:"",search:"",status:"active",min:0,max:1,grades:[],cur:null,initData:"",
   view:"browse",curList:[],mine:null,board:null,hot:null,setter:null};
 
 (function tg(){
@@ -248,6 +252,10 @@ function fmtAvg(d){return d==null||d===0?"—":(Math.round(d*10)/10).toFixed(1)}
 function filtered(){
   let l=state.routes;
   if(state.wall)l=l.filter(r=>r.wall===state.wall);
+  if(state.search){
+    const q=state.search.trim().toLowerCase();
+    if(q)l=l.filter(r=>r.name.toLowerCase().includes(q)||(r.setter_name||"").toLowerCase().includes(q));
+  }
   const lo=state.min-1, hi=state.max-1;
   if(lo>=0)l=l.filter(r=>r.grade_low>=lo&&r.grade_low!==-1);
   if(hi<state.grades.length-2)l=l.filter(r=>r.grade_low<=hi);
@@ -590,6 +598,7 @@ $("#statusseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   load();
 });
 $("#wall").onchange=e=>{state.wall=e.target.value;paint()};
+$("#search").oninput=e=>{state.search=e.target.value;paint()};
 $("#min").oninput=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI()};
 $("#min").onchange=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI();paint()};
 $("#max").oninput=e=>{let v=+e.target.value;if(v<state.min)v=state.min;state.max=v;e.target.value=v;updateRangeUI()};

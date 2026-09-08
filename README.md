@@ -48,6 +48,9 @@ they just keep posting route pics.
 - **Setter profiles** — `/setter <name>` (bot), or tap a route's "set by
   X" credit in the mini-app: routes set (active/retired), a weighted
   average of ratings received, and their most-sent route.
+- **Search** — `/search <name or setter>` (bot), or the search box in the
+  mini-app's Browse tab: case-insensitive match against route name or
+  setter name.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |

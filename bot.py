@@ -291,7 +291,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/mine — your own send history\n"
         "/leaderboard — top climbers & setters\n"
         "/hot — what's hot this week\n"
-        "/setter <name> — a setter's profile\n\n"
+        "/setter <name> — a setter's profile\n"
+        "/search <name or setter> — find a route\n\n"
         "Tap for the full collection.",
         parse_mode="Markdown",
         reply_markup=_app_link({}),
@@ -322,6 +323,28 @@ async def cmd_routes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     stats = storage.stats()
     lines.append(f"\n_{stats['active']} active · {stats['retired']} retired all-time_")
     await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Search active routes by name or setter: /search <query>."""
+    args = ctx.args or []
+    if not args:
+        await update.effective_message.reply_text("Usage: /search <name or setter>")
+        return
+    query = " ".join(args)
+    routes = storage.list_routes(search=query)
+    if not routes:
+        await update.effective_message.reply_text(f"No routes matching {query!r}.")
+        return
+    lines = [f"*{len(routes)} match" + ("" if len(routes) == 1 else "es")
+             + f'* for "{_md_escape(query)}"']
+    for r in routes[:30]:
+        lines.append(_route_line(r))
+    if len(routes) > 30:
+        lines.append(f"\n…and {len(routes) - 30} more. Open the collection for all.")
+    await update.effective_message.reply_text(
+        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
+    )
 
 
 def _hardest(routes: list[dict]):
@@ -664,6 +687,7 @@ def run():
     app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
     app.add_handler(CommandHandler("hot", cmd_hot))
     app.add_handler(CommandHandler("setter", cmd_setter))
+    app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("reset", cmd_reset))
