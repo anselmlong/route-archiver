@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -64,15 +64,13 @@ def _route_line(r: dict) -> str:
 
 
 def _app_link(r: dict) -> InlineKeyboardMarkup:
-    """Button that opens the collection (in-app browser viewport).
+    """WebApp button that opens the collection as a full-screen Telegram Mini App.
 
-    NOTE: an inline `web_app` button would open as a true full-screen Mini App,
-    but that requires the domain to be registered with the bot via @BotFather
-    (/newapp) first — unregistered domains get 'Button_type_invalid'. So inline
-    buttons use a plain URL for now; the native Mini App entry is the bot's menu
-    button (set via set_chat_menu_button), which needs no registration.
+    Domain routes.anselmlong.com is registered with the bot (@BotFather), so
+    inline web_app buttons are allowed (unregistered domains get
+    'Button_type_invalid').
     """
-    kb = [[InlineKeyboardButton("🗂 Open collection", url=APP_BASE)]]
+    kb = [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]]
     return InlineKeyboardMarkup(kb)
 
 
@@ -183,7 +181,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route_id}"),
         ]
     ]
-    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=APP_BASE)]])
+    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]])
 
     await msg.reply_text(
         f"✅ Archived *{route['name']}* — {route['grade']}"
@@ -345,6 +343,14 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _edit_flow(update, ctx, int(data.split(":")[1]))
 
 
+async def cmd_app(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Open the Mini App directly."""
+    await update.effective_message.reply_text(
+        "Open the route collection 👇",
+        reply_markup=_app_link({}),
+    )
+
+
 async def _set_menu_button(app) -> None:
     """Pin the Mini App as the bot's menu button (the ⋯ / ⚙️ menu)."""
     try:
@@ -357,6 +363,7 @@ def run():
     app = Application.builder().token(BOT_TOKEN).post_init(_set_menu_button).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("routes", cmd_routes))
+    app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("setchat", cmd_setchat))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CallbackQueryHandler(on_callback))
