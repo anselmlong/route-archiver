@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -64,12 +64,15 @@ def _route_line(r: dict) -> str:
 
 
 def _app_link(r: dict) -> InlineKeyboardMarkup:
-    """WebApp button that opens the collection as a full-screen Telegram Mini App.
+    """Button that opens the collection.
 
-    Domain whitelisted with the bot via @BotFather /setdomain, so inline web_app
-    buttons are allowed (unwhitelisted domains get 'Button_type_invalid').
+    URL button for now: inline web_app buttons need the domain registered via
+    @BotFather '/setmenubutton' (not /setdomain, which only covers the Login
+    Widget). Until that's done, web_app gets Button_type_invalid and crashes the
+    photo-reply handler. The full-screen Mini App is available via the menu
+    button + official t.me link.
     """
-    kb = [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]]
+    kb = [[InlineKeyboardButton("🗂 Open collection", url=APP_BASE)]]
     return InlineKeyboardMarkup(kb)
 
 
@@ -180,7 +183,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route_id}"),
         ]
     ]
-    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]])
+    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=APP_BASE)]])
 
     await msg.reply_text(
         f"✅ Archived *{route['name']}* — {route['grade']}"
