@@ -380,6 +380,50 @@ def test_leaderboard_limit_is_clamped(client, api_module):
 
 
 # --------------------------------------------------------------------------- #
+# GET /api/hot
+# --------------------------------------------------------------------------- #
+def test_hot_is_public_no_auth_needed(client, api_module):
+    r = client.get("/api/hot")
+    assert r.status_code == 200
+    assert r.json() == {"routes": [], "days": 7}
+
+
+def test_hot_ranks_by_recent_ticks_and_hides_internal_fields(client, api_module):
+    a = _seed_route(api_module, name="A")
+    b = _seed_route(api_module, name="B")
+    s = api_module.storage
+    s.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    s.toggle_tick(a["id"], tg_user_id=2, tg_user_name="Cat")
+    s.toggle_tick(b["id"], tg_user_id=1, tg_user_name="Bob")
+
+    body = client.get("/api/hot").json()
+    assert [r["name"] for r in body["routes"]] == ["A", "B"]
+    assert body["routes"][0]["recent_ticks"] == 2
+    assert "photo_path" not in body["routes"][0]
+
+
+def test_hot_personalizes_when_tg_param_given(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    api_module.storage.set_rating(route["id"], tg_user_id=1, tg_user_name="A", value=5)
+    api_module.storage.toggle_tick(route["id"], tg_user_id=1, tg_user_name="A")
+
+    row = client.get("/api/hot", params={"tg": raw}).json()["routes"][0]
+    assert row["my_rating"] == 5
+    assert row["my_tick"] == 1
+
+
+def test_hot_days_and_limit_are_clamped(client, api_module):
+    route = _seed_route(api_module)
+    api_module.storage.toggle_tick(route["id"], tg_user_id=1, tg_user_name="Bob")
+    r = client.get("/api/hot", params={"days": 0, "limit": 0})
+    assert r.status_code == 200
+    r2 = client.get("/api/hot", params={"days": 9999})
+    assert r2.status_code == 200
+    assert r2.json()["days"] == 90
+
+
+# --------------------------------------------------------------------------- #
 # misc
 # --------------------------------------------------------------------------- #
 def test_healthz(client):

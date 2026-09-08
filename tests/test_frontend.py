@@ -418,3 +418,49 @@ def test_consensus_grade_hidden_when_no_ticks(page):
     page.locator(".card", has_text="Weird").click()
     page.wait_for_selector(".scrim.open")
     assert not page.locator("#sconsensus").is_visible()
+
+
+# --------------------------------------------------------------------------- #
+# Hot (route of the week) view
+# --------------------------------------------------------------------------- #
+def test_hot_view_shows_ticked_routes_with_stats_header(page):
+    page.locator('[data-view="hot"]').click()
+    page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    names = set(page.locator(".nm").all_inner_texts())
+    # Crack Line and Stripped Slab both have a tick in the fixture;
+    # "Weird Name" has none, so it's excluded from Hot entirely
+    assert names == {"Crack Line", "Stripped Slab"}
+    assert "route of the week" in page.locator("#hotStats").inner_text()
+
+
+def test_hot_view_card_shows_recent_tick_badge(page):
+    page.locator('[data-view="hot"]').click()
+    page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    badge = page.locator(".card", has_text="Crack Line").locator(".hotcount")
+    assert badge.count() == 1
+    assert "🔥" in badge.inner_text()
+
+
+def test_hot_view_empty_state_when_nothing_ticked_this_week(tmp_path, monkeypatch):
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "empty_hot.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+    api_mod.storage.add_route(name="Untouched", grade="V4", grade_low=5)
+
+    base_url, server, thread = _boot_server(api_mod.app)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+            pg = browser.new_page()
+            pg.goto(base_url + "/")
+            pg.wait_for_selector(".card")
+            pg.locator('[data-view="hot"]').click()
+            pg.wait_for_selector("#empty:not([hidden])")
+            assert "No sends yet this week" in pg.locator("#empty").inner_text()
+            browser.close()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

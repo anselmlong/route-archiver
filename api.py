@@ -240,6 +240,27 @@ def leaderboard(limit: int = 10):
     }
 
 
+@app.get("/api/hot")
+def hot(request: Request, days: int = 7, limit: int = 10, tg: str | None = None):
+    """Routes with the most ticks in the last `days` days -- rank #1 is
+    the "route of the week". Personalised the same way /api/routes is
+    (optional tg initData), public otherwise since it's aggregate data."""
+    days = max(1, min(days, 90))
+    limit = max(1, min(limit, 50))
+    rows = storage.hot_routes(days=days, limit=limit)
+    viewer = None
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    if raw:
+        try:
+            viewer, _ = validate_init_data(raw)
+        except ValueError:
+            viewer = None
+    storage.attach_ratings_and_ticks(rows, tg_user_id=viewer)
+    for r in rows:
+        r.pop("photo_path", None)
+    return {"routes": rows, "days": days}
+
+
 @app.get("/api/photo/{route_id}")
 def photo(route_id: int):
     r = storage.get_route(route_id)

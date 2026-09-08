@@ -587,6 +587,25 @@ class Storage:
         return [{"setter_id": r["setter_id"], "setter_name": r["setter_name"],
                   "routes_set": r["c"]} for r in rows]
 
+    def hot_routes(self, days=7, limit=10):
+        """Routes with the most ticks recorded in the last `days` days --
+        "what's hot right now" / route-of-the-week is just rank #1 of this
+        list. Ranked by recent tick count, ties broken by the most recent
+        tick. Retired routes can still show up here (a route can get hot
+        right before a reset); deleted ones never do. Each row is a full
+        route dict (like list_routes) plus `recent_ticks`."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT r.*, COUNT(*) recent_ticks, MAX(t.created_at) latest_tick "
+                "FROM ticks t JOIN routes r ON r.id = t.route_id "
+                "WHERE r.deleted = 0 AND t.created_at >= datetime('now', ?) "
+                "GROUP BY r.id "
+                "ORDER BY recent_ticks DESC, latest_tick DESC "
+                "LIMIT ?",
+                (f"-{int(days)} days", limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def attach_ratings_and_ticks(self, routes, tg_user_id=None):
         """Mutate route dicts in place: avg/count/my_rating, tick_count/my_tick."""
         if not routes:

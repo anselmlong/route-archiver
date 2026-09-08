@@ -289,7 +289,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "Post it in the topic for its wall (left / overhang / slab) and I'll\n"
         "tag the wall automatically.\n\n"
         "/mine — your own send history\n"
-        "/leaderboard — top climbers & setters\n\n"
+        "/leaderboard — top climbers & setters\n"
+        "/hot — what's hot this week\n\n"
         "Tap for the full collection.",
         parse_mode="Markdown",
         reply_markup=_app_link({}),
@@ -379,6 +380,25 @@ async def cmd_leaderboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(f"{rank} {name} — {s['routes_set']} routes set")
 
     await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_hot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """What's hot this week -- routes with the most ticks in the last 7
+    days, rank #1 being the de facto "route of the week": /hot."""
+    routes = storage.hot_routes(days=7, limit=10)
+    if not routes:
+        await update.effective_message.reply_text(
+            "No sends yet this week — be the first!", reply_markup=_app_link({})
+        )
+        return
+    lines = ["🔥 *Hot this week*"]
+    for i, r in enumerate(routes):
+        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
+        n = r["recent_ticks"]
+        lines.append(f"{rank} {_route_line(r)} — {n} send{'' if n == 1 else 's'} this week")
+    await update.effective_message.reply_text(
+        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -616,6 +636,7 @@ def run():
     app.add_handler(CommandHandler("routes", cmd_routes))
     app.add_handler(CommandHandler("mine", cmd_mine))
     app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
+    app.add_handler(CommandHandler("hot", cmd_hot))
     app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("reset", cmd_reset))

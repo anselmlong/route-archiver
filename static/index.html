@@ -54,6 +54,7 @@
   .stars{color:var(--star);font-size:12px;letter-spacing:1px}
   .starcount{color:var(--muted);font-size:11px}
   .tickcount{color:var(--tick);font-size:11px}
+  .hotcount{color:var(--accent);font-size:11px}
   .badges{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}
   .empty{padding:48px 0;text-align:center;color:var(--muted);font-size:13.5px}
 
@@ -121,6 +122,7 @@
     <button data-view="browse" class="on">Browse</button>
     <button data-view="mine">Mine</button>
     <button data-view="board">Leaderboard</button>
+    <button data-view="hot">🔥 Hot</button>
   </div>
 
   <div id="browseControls">
@@ -147,6 +149,7 @@
   </div>
 
   <div class="mine-stats" id="mineStats" hidden></div>
+  <div class="mine-stats" id="hotStats" hidden></div>
   <div class="board" id="board" hidden></div>
 
   <div class="grid" id="grid"></div>
@@ -183,7 +186,7 @@
 <script>
 const $=s=>document.querySelector(s);
 const state={routes:[],sort:"grade",wall:"",status:"active",min:0,max:1,grades:[],cur:null,initData:"",
-  view:"browse",curList:[],mine:null,board:null};
+  view:"browse",curList:[],mine:null,board:null,hot:null};
 
 (function tg(){
   if(window.Telegram&&window.Telegram.WebApp){
@@ -256,10 +259,12 @@ function paint(){
 
 function findRoutes(id){
   // the same route can exist as separate object instances in state.routes
-  // (browse) and state.mine.routes (personal logbook) -- return every copy
-  // so a rating/tick updates whichever one is actually on screen
+  // (browse), state.mine.routes (personal logbook) and state.hot.routes
+  // (this week's hot list) -- return every copy so a rating/tick updates
+  // whichever one is actually on screen
   const out=state.routes.filter(x=>x.id===id);
   if(state.mine)out.push(...state.mine.routes.filter(x=>x.id===id));
+  if(state.hot)out.push(...state.hot.routes.filter(x=>x.id===id));
   return out;
 }
 
@@ -278,6 +283,7 @@ function renderGrid(list){
         <div class="badges">
           ${stars(r.avg_rating)}<span class="starcount">${r.rating_count||""}</span>
           ${(r.tick_count||0)>0?`<span class="tickcount">✓ ${r.tick_count}</span>`:""}
+          ${r.recent_ticks?`<span class="hotcount">🔥 ${r.recent_ticks}</span>`:""}
         </div>
       </div>
     </div>`).join("");
@@ -306,6 +312,7 @@ function setView(v){
   $("#viewseg").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
   $("#browseControls").hidden=v!=="browse";
   $("#mineStats").hidden=v!=="mine";
+  $("#hotStats").hidden=v!=="hot";
   $("#board").hidden=v!=="board";
   $("#grid").hidden=v==="board";
   $("#empty").hidden=true;
@@ -318,6 +325,8 @@ function setView(v){
   }else if(v==="board"){
     $("#count").textContent="";
     loadBoard();
+  }else if(v==="hot"){
+    loadHot();
   }
 }
 
@@ -355,6 +364,35 @@ function renderMine(){
   $("#count").textContent="";
   $("#empty").textContent="No ticks yet — open a route and mark it sent.";
   renderGrid(m.routes);
+}
+
+async function loadHot(){
+  $("#sub").textContent="loading this week's hot routes…";
+  try{
+    let q="/api/hot";
+    if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
+    state.hot=await fetch(q).then(x=>x.json());
+    $("#sub").textContent="tap a card for details";
+    renderHot();
+  }catch(e){
+    $("#sub").textContent="tap a card for details";
+    $("#grid").innerHTML="";
+    $("#empty").hidden=false;
+    $("#empty").textContent="Couldn't load this week's hot routes. Try again shortly.";
+  }
+}
+
+function renderHot(){
+  const h=state.hot;
+  if(!h)return;
+  const top=h.routes[0];
+  $("#hotStats").innerHTML=top
+    ?`<div class="mrow">🔥 <b>${esc(top.name)}</b> is the route of the week — `+
+      `${top.recent_ticks} send${top.recent_ticks===1?"":"s"} in the last ${h.days} days</div>`
+    :"";
+  $("#count").textContent="";
+  $("#empty").textContent="No sends yet this week — be the first!";
+  renderGrid(h.routes);
 }
 
 async function loadBoard(){

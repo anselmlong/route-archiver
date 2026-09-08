@@ -424,3 +424,62 @@ def test_consensus_grade_untick_removes_its_contribution(storage):
     storage.attach_ratings_and_ticks(rows)
     assert rows[0]["consensus_grade"] is None
     assert rows[0]["consensus_count"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Storage: hot routes / route of the week
+# --------------------------------------------------------------------------- #
+def _backdate_tick(storage, route_id, tg_user_id, days_ago):
+    with storage._connect() as conn:
+        conn.execute(
+            "UPDATE ticks SET created_at=datetime('now', ?) WHERE route_id=? AND tg_user_id=?",
+            (f"-{days_ago} days", route_id, tg_user_id),
+        )
+
+
+def test_hot_routes_ranks_by_recent_tick_count(storage):
+    a = storage.add_route(name="A", grade="V4", grade_low=5)
+    b = storage.add_route(name="B", grade="V6", grade_low=7)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.toggle_tick(a["id"], tg_user_id=2, tg_user_name="Cat")
+    storage.toggle_tick(b["id"], tg_user_id=1, tg_user_name="Bob")
+    hot = storage.hot_routes()
+    assert [r["name"] for r in hot] == ["A", "B"]
+    assert hot[0]["recent_ticks"] == 2
+    assert hot[1]["recent_ticks"] == 1
+
+
+def test_hot_routes_excludes_ticks_outside_window(storage):
+    a = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    _backdate_tick(storage, a["id"], 1, days_ago=30)
+    assert storage.hot_routes(days=7) == []
+    assert len(storage.hot_routes(days=60)) == 1
+
+
+def test_hot_routes_excludes_deleted_routes(storage):
+    a = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.delete_route(a["id"])
+    assert storage.hot_routes() == []
+
+
+def test_hot_routes_includes_retired_routes(storage):
+    a = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    storage.retire_route(a["id"])
+    hot = storage.hot_routes()
+    assert len(hot) == 1
+    assert hot[0]["retired_at"] is not None
+
+
+def test_hot_routes_respects_limit(storage):
+    for i in range(5):
+        r = storage.add_route(name=f"R{i}", grade="V1", grade_low=1)
+        storage.toggle_tick(r["id"], tg_user_id=i, tg_user_name=f"U{i}")
+    assert len(storage.hot_routes(limit=2)) == 2
+
+
+def test_hot_routes_empty_when_no_ticks(storage):
+    storage.add_route(name="A", grade="V4", grade_low=5)
+    assert storage.hot_routes() == []

@@ -311,3 +311,30 @@ def test_cmd_leaderboard_ranks_climbers_and_setters(bot_module):
     assert "🥈 Cat — 1 sends · hardest V1" in text
     assert "🥇 Sam — 2 routes set" in text
     assert "🥈 Ana — 1 routes set" in text
+
+
+# --------------------------------------------------------------------------- #
+# /hot -- also open to any user
+# --------------------------------------------------------------------------- #
+def test_cmd_hot_empty_state(bot_module):
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_hot(update, FakeCtx()))
+    assert "No sends yet this week" in msg.replies[0]["text"]
+
+
+def test_cmd_hot_ranks_by_recent_ticks(bot_module):
+    a = _seed(bot_module, name="Popular", grade="V4", grade_low=5)
+    b = _seed(bot_module, name="Quiet", grade="V6", grade_low=7)
+    s = bot_module.storage
+    s.toggle_tick(a["id"], tg_user_id=1, tg_user_name="Bob")
+    s.toggle_tick(a["id"], tg_user_id=2, tg_user_name="Cat")
+    s.toggle_tick(b["id"], tg_user_id=1, tg_user_name="Bob")
+
+    msg = FakeMessage()
+    update = FakeUpdate(user=FakeUser(NON_ADMIN_ID), message=msg)
+    run(bot_module.cmd_hot(update, FakeCtx()))
+    text = msg.replies[0]["text"]
+    assert text.index("Popular") < text.index("Quiet")
+    assert "2 sends this week" in text
+    assert "1 send this week" in text

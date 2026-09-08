@@ -42,6 +42,9 @@ they just keep posting route pics.
   suggestion (and how many people weighed in) alongside the setter's own
   grade. Free-text suggestions that don't parse as a V-grade are simply
   excluded, not rejected.
+- **Route of the week** — `/hot` (bot) or the mini-app's "🔥 Hot" tab: the
+  routes with the most sends in the last 7 days, rank #1 being the de
+  facto route of the week.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |
