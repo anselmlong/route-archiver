@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -64,7 +64,8 @@ def _route_line(r: dict) -> str:
 
 
 def _app_link(r: dict) -> InlineKeyboardMarkup:
-    kb = [[InlineKeyboardButton("🗂 View collection", url=f"{APP_BASE}")]]
+    """WebApp button that opens the collection as a Telegram Mini App."""
+    kb = [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]]
     return InlineKeyboardMarkup(kb)
 
 
@@ -175,7 +176,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route_id}"),
         ]
     ]
-    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 View collection", url=f"{APP_BASE}")]])
+    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]])
 
     await msg.reply_text(
         f"✅ Archived *{route['name']}* — {route['grade']}"
@@ -337,8 +338,16 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _edit_flow(update, ctx, int(data.split(":")[1]))
 
 
+async def _set_menu_button(app) -> None:
+    """Pin the Mini App as the bot's menu button (the ⋯ / ⚙️ menu)."""
+    try:
+        await app.bot.set_chat_menu_button(menu_button={"type": "web_app", "text": "Routes", "web_app": {"url": APP_BASE}})
+    except Exception as e:
+        log.warning("set_chat_menu_button failed: %s", e)
+
+
 def run():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(_set_menu_button).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("routes", cmd_routes))
     app.add_handler(CommandHandler("setchat", cmd_setchat))

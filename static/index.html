@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NUS USC Routes</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root{
     --bg:#0f1115; --panel:#171a21; --panel2:#1f232c; --border:#2a2f3a;
@@ -66,7 +67,7 @@
     <h1>🧗 NUS USC <span>Routes</span></h1>
     <div class="count" id="count"></div>
   </div>
-  <div class="sub">Tap a grade to filter · tap a route for details</div>
+  <div class="sub" id="subline">Tap a grade to filter · tap a route for details</div>
 </header>
 
 <div class="sortrow">
@@ -100,6 +101,20 @@
 
 <script>
 const state = {routes:[], grade:"", wall:"", sort:"grade", gradeIdx:{}};
+
+// ---- Telegram Mini App init ----
+(function initTg(){
+  if (window.Telegram && window.Telegram.WebApp){
+    window.Telegram.WebApp.ready();
+    window.Telegram.WebApp.expand();
+    window.Telegram.WebApp.setHeaderColor && window.Telegram.WebApp.setHeaderColor('#0f1115');
+    const u = window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user;
+    if (u && u.first_name){
+      const el = document.getElementById('subline');
+      if (el) el.textContent = 'Hey ' + u.first_name + ' · tap a grade to filter, tap a route for details';
+    }
+  }
+})();
 
 async function load(){
   const [r,k] = await Promise.all([
