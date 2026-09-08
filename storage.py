@@ -9,21 +9,21 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "routes.db"
 
-# V-scale ordering for sorting. Higher index = harder. Capped at V8+ per the gym.
-# Wildcard routes (V? / V) are NOT in this scale — they get grade_low -1 below
-# everything, so they sort last and never shift the real grade indices.
+# V-scale ordering for sorting. Higher index = harder. No half-steps below the
+# top (V4+ -> V4), since nobody at NUS realistically climbs past V8 — so the
+# cap is V8+ (the single remaining half-step). Wildcard routes (V? / V) are NOT
+# in this scale — they get grade_low -1 below everything.
 V_ORDER = [
-    "VB", "V0", "V0+", "V1", "V1+", "V2", "V2+", "V3", "V3+",
-    "V4", "V4+", "V5", "V5+", "V6", "V6+", "V7", "V7+", "V8", "V8+",
+    "VB", "V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V8+",
 ]
 _V_IDX = {g: i for i, g in enumerate(V_ORDER)}
 MAX_IDX = _V_IDX["V8+"]  # anything harder than this gets clamped to V8+
 WILD_LOW = -1  # sort index for V? / V wildcard routes
 
-# fuller accepted scale for parsing; grades above V8+ are clamped, not rejected
-_FULL = V_ORDER + [
-    "V9", "V9+", "V10", "V10+", "V11", "V11+", "V12", "V12+",
-    "V13", "V13+", "V14", "V14+", "V15", "V15+", "V16", "V16+", "V17",
+# fuller accepted scale for parsing; grades harder than V8+ clamp down to V8+
+_FULL = [
+    "VB", "V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V8+",
+    "V9", "V10", "V11", "V12", "V13", "V14", "V15", "V16", "V17",
 ]
 _FULL_IDX = {g: i for i, g in enumerate(_FULL)}
 
@@ -60,18 +60,27 @@ def _norm_grade(s: str) -> str:
     return re.sub(r"\s+", "", s).upper()
 
 
+def _norm_one(p: str) -> str:
+    """Normalize a single grade part: prefix V and strip half-steps.
+    V8+ is the intended max (nobody at NUS realistically climbs past it), so it
+    is the ONE half-step that survives: 'V4+'->'V4', 'V7+'->'V7', 'V8+'->'V8+'.
+    """
+    p = p.strip()
+    if p and not p.startswith("V"):
+        p = "V" + p
+    if p == "V8+":
+        return p
+    return p.rstrip("+")
+
+
 def _normalize_grade_token(tok: str) -> str:
     """Turn a raw grade token into a canonical form with V on every side.
 
-    'V3-4', 'V3/V4', 'V3–4', 'v4' -> 'V3-V4' / 'V3-V4' / 'V3-V4' / 'V4'.
+    Half-steps are stripped below the top (V4+ -> V4); V8+ is kept. Range sides
+    get the same treatment: 'V3-4', 'V3/V4', 'v4+' -> 'V3-V4'/'V3-V4'/'V4'.
     """
     parts = re.split(r"[-/–]", tok)
-    out = []
-    for p in parts:
-        p = p.strip()
-        if p and not p.startswith("V"):
-            p = "V" + p
-        out.append(p)
+    out = [_norm_one(p) for p in parts]
     return "-".join(out)
 
 
@@ -217,15 +226,15 @@ class Storage:
                 conn.execute("ALTER TABLE routes ADD COLUMN description TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_routes_grade ON routes(grade_low)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_routes_wall ON routes(wall)")
-            # one vote (up or down) per user per route
+            # star ratings: one 1-5 rating per user per route
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS votes (
+                CREATE TABLE IF NOT EXISTS ratings (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
                     route_id     INTEGER NOT NULL REFERENCES routes(id),
                     tg_user_id   INTEGER NOT NULL,
                     tg_user_name TEXT,
-                    value        INTEGER NOT NULL CHECK (value IN (-1, 1)),
+                    value        INTEGER NOT NULL CHECK (value BETWEEN 1 AND 5),
                     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
                     UNIQUE (route_id, tg_user_id)
@@ -233,8 +242,26 @@ class Storage:
                 """
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_votes_route ON votes(route_id)"
+                "CREATE INDEX IF NOT EXISTS idx_ratings_route ON ratings(route_id)"
             )
+            # ascent ticks: one self-reported send per user per route
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ticks (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    route_id        INTEGER NOT NULL REFERENCES routes(id),
+                    tg_user_id      INTEGER NOT NULL,
+                    tg_user_name    TEXT,
+                    suggested_grade TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE (route_id, tg_user_id)
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_route ON ticks(route_id)")
+            # legacy up/down votes table is gone; drop any stale one from an old deploy
+            conn.execute("DROP TABLE IF EXISTS votes")
 
     def add_route(self, *, name, grade, grade_low, wall=None, description=None,
                   photo_path=None, photo_fid=None,
@@ -315,30 +342,29 @@ class Storage:
             ).fetchall()
         return sorted(r["wall"] for r in rows)
 
-    def set_vote(self, route_id, tg_user_id, tg_user_name, value):
-        """Record (or remove) a user's vote on a route.
+        # ---- star ratings (1-5) -----------------------------------------
+    def set_rating(self, route_id, tg_user_id, tg_user_name, value):
+        """Upsert a user's 1-5 star rating on a route.
 
-        One vote per user per route. Voting with the SAME value again toggles
-        the vote off; a different value switches it up/down. Returns a dict with
-        the user's current vote (1/-1/None) plus the fresh tallies.
+        Tapping your own rating again clears it (unstar). Returns
+        {avg, count, my_rating} where my_rating is the stored value or None.
         """
-        value = 1 if value >= 0 else -1
-        new_vote = None
+        value = max(1, min(5, int(value)))
+        my = None
         with self._lock, self._connect() as conn:
             row = conn.execute(
-                "SELECT value FROM votes WHERE route_id=? AND tg_user_id=?",
+                "SELECT value FROM ratings WHERE route_id=? AND tg_user_id=?",
                 (route_id, tg_user_id),
             ).fetchone()
             if row and row["value"] == value:
-                # same vote again -> retract
                 conn.execute(
-                    "DELETE FROM votes WHERE route_id=? AND tg_user_id=?",
+                    "DELETE FROM ratings WHERE route_id=? AND tg_user_id=?",
                     (route_id, tg_user_id),
                 )
             else:
                 conn.execute(
                     """
-                    INSERT INTO votes (route_id, tg_user_id, tg_user_name, value)
+                    INSERT INTO ratings (route_id, tg_user_id, tg_user_name, value)
                     VALUES (?,?,?,?)
                     ON CONFLICT(route_id, tg_user_id)
                     DO UPDATE SET value=excluded.value,
@@ -347,65 +373,109 @@ class Storage:
                     """,
                     (route_id, tg_user_id, tg_user_name, value),
                 )
-                new_vote = value
-        out = self._vote_totals(route_id)
-        out["value"] = new_vote
+                my = value
+        out = self._rating_summary(route_id)
+        out["my_rating"] = my
         return out
 
-    def _vote_totals(self, route_id):
-        with self._lock, self._connect() as conn:
-            up = conn.execute(
-                "SELECT COUNT(*) c FROM votes WHERE route_id=? AND value=1", (route_id,)
-            ).fetchone()["c"]
-            down = conn.execute(
-                "SELECT COUNT(*) c FROM votes WHERE route_id=? AND value=-1", (route_id,)
-            ).fetchone()["c"]
-        return {"upvotes": up, "downvotes": down, "score": up - down}
-
-    def my_vote(self, route_id, tg_user_id):
-        if not tg_user_id:
-            return None
+    def _rating_summary(self, route_id):
         with self._lock, self._connect() as conn:
             row = conn.execute(
-                "SELECT value FROM votes WHERE route_id=? AND tg_user_id=?",
+                "SELECT COUNT(*) c, AVG(value) av FROM ratings WHERE route_id=?",
+                (route_id,),
+            ).fetchone()
+        c = row["c"] or 0
+        return {"avg": round((row["av"] or 0) * 2) / 2, "count": c}
+
+    # ---- ascent ticks (self-reported sends) -----------------------------
+    def toggle_tick(self, route_id, tg_user_id, tg_user_name, suggested_grade=None):
+        """Toggle a user's ascent tick on/off. Returns
+        {ticked, count, suggested_grade}."""
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM ticks WHERE route_id=? AND tg_user_id=?",
                 (route_id, tg_user_id),
             ).fetchone()
-        return row["value"] if row else None
+            if row:
+                conn.execute(
+                    "DELETE FROM ticks WHERE route_id=? AND tg_user_id=?",
+                    (route_id, tg_user_id),
+                )
+                ticked = False
+            else:
+                conn.execute(
+                    "INSERT INTO ticks (route_id, tg_user_id, tg_user_name, suggested_grade) VALUES (?,?,?,?)",
+                    (route_id, tg_user_id, tg_user_name,
+                     _clean_free(suggested_grade) if suggested_grade else None),
+                )
+                ticked = True
+        count = self._tick_count(route_id)
+        return {"ticked": ticked, "count": count,
+                "suggested_grade": None if not ticked else (suggested_grade or "").strip()}
 
-    def attach_votes(self, routes, tg_user_id=None):
-        """Mutate a list of route dicts in place, adding up/down/score/my_vote."""
+    def set_tick_grade(self, route_id, tg_user_id, suggested_grade):
+        """Update the suggested grade on an existing tick."""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE ticks SET suggested_grade=?, updated_at=datetime('now') "
+                "WHERE route_id=? AND tg_user_id=?",
+                (_clean_free(suggested_grade) if suggested_grade else None,
+                 route_id, tg_user_id),
+            )
+
+    def _tick_count(self, route_id):
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) c FROM ticks WHERE route_id=?", (route_id,)
+            ).fetchone()
+        return row["c"]
+
+    def attach_ratings_and_ticks(self, routes, tg_user_id=None):
+        """Mutate route dicts in place: avg/count/my_rating, tick_count/my_tick."""
         if not routes:
             return routes
         ids = [r["id"] for r in routes]
         marks = ",".join("?" * len(ids))
         with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                f"SELECT route_id, value, COUNT(*) c FROM votes "
-                f"WHERE route_id IN ({marks}) GROUP BY route_id, value",
+            rating_rows = conn.execute(
+                f"SELECT route_id, AVG(value) av, COUNT(*) c FROM ratings "
+                f"WHERE route_id IN ({marks}) GROUP BY route_id",
                 ids,
             ).fetchall()
-            mine = {}
+            tick_rows = conn.execute(
+                f"SELECT route_id, COUNT(*) c FROM ticks "
+                f"WHERE route_id IN ({marks}) GROUP BY route_id",
+                ids,
+            ).fetchall()
+            mine_r = {}
+            mine_t = {}
+            mine_tg = {}
             if tg_user_id:
                 for row in conn.execute(
-                    f"SELECT route_id, value FROM votes "
+                    f"SELECT route_id, value FROM ratings "
                     f"WHERE tg_user_id=? AND route_id IN ({marks})",
                     [tg_user_id] + ids,
                 ).fetchall():
-                    mine[row["route_id"]] = row["value"]
+                    mine_r[row["route_id"]] = row["value"]
+                for row in conn.execute(
+                    f"SELECT route_id, suggested_grade FROM ticks "
+                    f"WHERE tg_user_id=? AND route_id IN ({marks})",
+                    [tg_user_id] + ids,
+                ).fetchall():
+                    mine_t[row["route_id"]] = 1
+                    mine_tg[row["route_id"]] = row["suggested_grade"]
         by_id = {r["id"]: r for r in routes}
-        up = down = {}
-        for row in rows:
-            if row["value"] == 1:
-                up[row["route_id"]] = row["c"]
-            else:
-                down[row["route_id"]] = row["c"]
+        agg_r = {r["route_id"]: r for r in rating_rows}
+        agg_t = {r["route_id"]: r for r in tick_rows}
         for rid, r in by_id.items():
-            u = up.get(rid, 0)
-            d = down.get(rid, 0)
-            r["upvotes"] = u
-            r["downvotes"] = d
-            r["score"] = u - d
-            r["my_vote"] = mine.get(rid)
+            ar = agg_r.get(rid)
+            at = agg_t.get(rid)
+            r["avg_rating"] = round((ar["av"] or 0) * 2) / 2 if ar and ar["c"] else None
+            r["rating_count"] = ar["c"] if ar else 0
+            r["my_rating"] = mine_r.get(rid)
+            r["tick_count"] = at["c"] if at else 0
+            r["my_tick"] = 1 if rid in mine_t else 0
+            r["my_suggested_grade"] = mine_tg.get(rid)
         return routes
 
     def stats(self):

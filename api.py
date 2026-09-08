@@ -21,10 +21,10 @@ BASE_DIR = Path(__file__).parent
 storage = Storage()
 
 # Bot token is only used to cryptographically verify Telegram Mini App init data
-# (so votes are scoped to real Telegram users, one per person per route).
+# (so ratings/ticks are scoped to real Telegram users, one per person per route).
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
-app = FastAPI(title="NUS USC Routes")
+app = FastAPI(title="USC Routes")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -41,7 +41,7 @@ def validate_init_data(raw: str, max_age: int = 86400):
 
     Verifies the HMAC-SHA256 signature and freshness. Raises ValueError when
     missing/invalid/stale. If BOT_TOKEN isn't configured, validation fails
-    closed (no votes).
+    closed.
     """
     if not BOT_TOKEN:
         raise ValueError("bot token not configured")
@@ -78,6 +78,12 @@ def validate_init_data(raw: str, max_age: int = 86400):
     return int(uid), name
 
 
+def _identity(body, request):
+    """Resolve + verify the acting Telegram user from a request."""
+    raw = body.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
+    return validate_init_data(raw)  # raises ValueError
+
+
 # --------------------------------------------------------------------------- #
 # routes
 # --------------------------------------------------------------------------- #
@@ -92,8 +98,8 @@ def routes(grade: str | None = None, wall: str | None = None,
            request: "Request" = None):  # type: ignore[assignment]  # fastapi injects
     """Return routes optionally filtered by minimum grade or exact wall.
 
-    Votes are attached; 'my_vote' is personalised when a valid Telegram
-    initData is supplied (as `tg` query param or X-Telegram-Init-Data header).
+    Ratings/ticks are attached; my_rating / my_tick are personalised when a
+    valid Telegram initData is supplied (as `tg` query param or header).
     """
     rows = storage.list_routes(grade=grade, wall=wall)
     viewer = None
@@ -103,37 +109,54 @@ def routes(grade: str | None = None, wall: str | None = None,
             viewer, _ = validate_init_data(raw)
         except ValueError:
             viewer = None
-    storage.attach_votes(rows, tg_user_id=viewer)
+    storage.attach_ratings_and_ticks(rows, tg_user_id=viewer)
     for r in rows:
         r.pop("photo_path", None)
         r.pop("_id", None)
     return {"routes": rows}
 
 
-@app.post("/api/vote/{route_id}")
-async def vote(route_id: int, request: Request):
-    """Upvote (value=1) or downvote (value=-1) a route as the requester.
-
-    Requires Telegram initData (sent in the JSON body as `init_data`) so each
-    Telegram account gets one vote per route. Voting the same way again retracts.
-    """
+@app.post("/api/rate/{route_id}")
+async def rate(route_id: int, request: Request):
+    """Set (1-5) or clear a user's star rating on a route."""
     body = await request.json()
-    value = body.get("value", 1)
-    if value not in (1, -1):
-        return JSONResponse(status_code=400, content={"error": "value must be 1 or -1"})
-
-    # accept initData from body (preferred, avoids header-length/escaping issues)
-    raw = body.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
+    value = body.get("value")
+    if value not in (1, 2, 3, 4, 5):
+        return JSONResponse(status_code=400, content={"error": "value must be 1-5"})
     try:
-        uid, name = validate_init_data(raw)
+        uid, name = _identity(body, request)
     except ValueError as e:
         return JSONResponse(status_code=401, content={"error": str(e)})
-
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
+    return storage.set_rating(route_id, uid, name, value)
 
-    result = storage.set_vote(route_id, uid, name, value)
-    return result
+
+@app.post("/api/tick/{route_id}")
+async def tick(route_id: int, request: Request):
+    """Toggle a user's ascent tick on/off (optionally with a suggested grade)."""
+    body = await request.json()
+    try:
+        uid, name = _identity(body, request)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+    if not storage.get_route(route_id):
+        return JSONResponse(status_code=404, content={"error": "route not found"})
+    suggested = body.get("suggested_grade")
+    return storage.toggle_tick(route_id, uid, name, suggested)
+
+
+@app.put("/api/tick/{route_id}/grade")
+async def tick_grade(route_id: int, request: Request):
+    """Update the suggested grade on an already-existing tick."""
+    body = await request.json()
+    try:
+        uid, _ = _identity(body, request)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+    suggested = body.get("suggested_grade")
+    storage.set_tick_grade(route_id, uid, suggested)
+    return {"ticked": True, "suggested_grade": suggested}
 
 
 @app.get("/api/meta")

@@ -1,4 +1,4 @@
-"""NUS USC Routes — telegram bot.
+"""USC Routes — telegram bot.
 
 Detects route-pic photos (with a caption containing a V-grade) posted in the
 group, parses name/grade/wall, stores the route + photo, and replies with a
@@ -250,7 +250,7 @@ async def on_topic_event(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # --------------------------------------------------------------------------- #
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
-        "🧗 *NUS USC Routes*\n\n"
+        "🧗 *USC Routes*\n\n"
         "Setters: post a photo of a route with its name + grade.\n"
         "`Crack Line V4`\n"
         "Post it in the topic for its wall (left / overhang / slab) and I'll\n"
