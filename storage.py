@@ -35,12 +35,16 @@ WALL_ALIASES = {
     "right slab": "right slab", "slab": "right slab",
 }
 
-# token-ish grade regex: VB, V0..V17, optional +, optional / Vx range.
+# token-ish grade regex: VB, V0..V17, optional +, optional range.
+# Range second side may lack the V prefix (V3-4) and may use / or en-dash.
 # Grades above V8+ are accepted here then clamped by _clamp_grade().
 _GRADE_RE = re.compile(
-    r"\bV(?:B|(?:1[0-7])|[0-9])\s*\+?\s*(?:[/-]\s*V(?:B|(?:1[0-7])|[0-9])\s*\+?)?",
+    r"\bV(?:B|1[0-7]|[0-9])\+?(?:\s*[-/–]\s*V?(?:B|1[0-7]|[0-9])\+?)?",
     re.IGNORECASE,
 )
+
+# fallback name when a caption is just a grade (e.g. "V4") with no route name
+DEFAULT_NAME = "Untitled"
 
 
 class GradeError(ValueError):
@@ -48,23 +52,47 @@ class GradeError(ValueError):
 
 
 def _norm_grade(s: str) -> str:
-    """Normalize 'v4+' -> 'V4+', 'vB'->'VB'. Keeps + and range separators."""
+    """Normalize 'v4+' -> 'V4+', 'vB'->'VB'. Removes spaces, keeps +/range."""
     return re.sub(r"\s+", "", s).upper()
+
+
+def _normalize_grade_token(tok: str) -> str:
+    """Turn a raw grade token into a canonical form with V on every side.
+
+    'V3-4', 'V3/V4', 'V3–4', 'v4' -> 'V3-V4' / 'V3-V4' / 'V3-V4' / 'V4'.
+    """
+    parts = re.split(r"[-/–]", tok)
+    out = []
+    for p in parts:
+        p = p.strip()
+        if p and not p.startswith("V"):
+            p = "V" + p
+        out.append(p)
+    return "-".join(out)
 
 
 def _grade_low(display: str) -> int:
     """Lower-bound sort index for a (possibly ranged) grade display."""
-    parts = re.split(r"[/-]", display)
+    parts = re.split(r"[-/]", display)
     return _V_IDX[parts[0]]
 
 
 def _clamp_grade(display):
     """Clamp any grade harder than V8+ down to V8+ (display + sort index)."""
-    parts = re.split(r"[/-]", display)
+    parts = re.split(r"[-/]", display)
     indices = [_FULL_IDX[p] for p in parts]
     if max(indices) > MAX_IDX:
         return "V8+", MAX_IDX
     return display, _grade_low(display)
+
+
+def _parse_grade_token(tok: str):
+    """Validate + normalize a grade token; returns (display, grade_low)."""
+    display = _normalize_grade_token(_norm_grade(tok))
+    for part in re.split(r"[-/]", display):
+        if part not in _FULL_IDX:
+            raise GradeError(f"unsupported grade {part}")
+    return _clamp_grade(display)
 
 
 def _norm_wall(w):
@@ -73,11 +101,39 @@ def _norm_wall(w):
     return WALL_ALIASES.get(w.strip().lower(), w.strip().lower())
 
 
-def parse_caption(caption: str) -> dict:
-    """Parse 'Route Name / V4+ / left vertical' style captions.
+def _clean_name(s: str) -> str:
+    """Strip trailing separators/brackets from the text before the grade."""
+    s = s.strip().rstrip(" /-,;:()[]{}").strip()
+    return s or DEFAULT_NAME
 
-    Returns dict with keys: name, grade (display), grade_low (int sort index),
-    wall (canonical). Raises GradeError if no valid V-grade found.
+
+def _extract_wall(after: str):
+    """Return the canonical wall if the tail matches a known section, else None.
+
+    Matches exact aliases first, then any known wall phrase as a substring, so
+    trailing notes like '(dont break pls)' are ignored instead of becoming walls.
+    """
+    if not after:
+        return None
+    cleaned = after.strip(" \t\r\n()[]{}.,;:/\\|-@")
+    if not cleaned:
+        return None
+    low = cleaned.lower()
+    if low in WALL_ALIASES:
+        return WALL_ALIASES[low]
+    # longest phrases first so 'left vertical' wins over bare 'left'
+    for phrase, canon in sorted(WALL_ALIASES.items(), key=lambda kv: -len(kv[0])):
+        if phrase in low:
+            return canon
+    return None
+
+
+def parse_caption(caption: str) -> dict:
+    """Parse a free-form route caption.
+
+    Handles 'Route / V4+ / left vertical', 'juggy one - V4', bare 'V4', and
+    'fun route (V3-4) (dont break pls)'. Returns dict with keys: name, grade,
+    grade_low, wall (canonical or None). Raises GradeError if no V-grade found.
     """
     if not caption:
         raise GradeError("no caption")
@@ -86,36 +142,17 @@ def parse_caption(caption: str) -> dict:
     if not m:
         raise GradeError("no V-grade found")
 
-    raw = m.group(0)
-    grade_display = _norm_grade(raw)
-    for part in re.split(r"[/-]", grade_display):
-        if part not in _FULL_IDX:
-            raise GradeError(f"unsupported grade {part}")
-    # clamp any grade harder than V8+ down to V8+
-    grade_display, grade_low = _clamp_grade(grade_display)
+    grade_display, grade_low = _parse_grade_token(m.group(0))
 
-    # name = everything before the grade token; wall = everything after
-    before = caption[: m.start()].strip(" /-,;:")
-    after = caption[m.end():].strip(" /-,;:")
-
-    if not before:
-        raise GradeError("no route name")
-
-    # extract wall: split on structured separators if present, else take the
-    # whole trailing text and strip any leading connector word ("on"/"at")
-    wall = None
-    for sep in ("/", "-", "|", "@"):
-        if sep in after:
-            wall = after.split(sep)[0].strip() or None
-            break
-    if wall is None and after:
-        wall = re.sub(r"^(?:on|at|the)\s+", "", after, flags=re.IGNORECASE).strip() or None
+    # name = everything before the grade; wall = matched from the tail
+    name = _clean_name(caption[: m.start()])
+    wall = _extract_wall(caption[m.end():])
 
     return {
-        "name": before,
+        "name": name,
         "grade": grade_display,
         "grade_low": grade_low,
-        "wall": _norm_wall(wall),
+        "wall": wall,
     }
 
 
@@ -186,8 +223,8 @@ class Storage:
         if not updates:
             return self.get_route(route_id)
         if "grade" in updates and "grade_low" not in updates:
-            updates["grade"], updates["grade_low"] = _clamp_grade(
-                _norm_grade(str(updates["grade"]))
+            updates["grade"], updates["grade_low"] = _parse_grade_token(
+                str(updates["grade"])
             )
         sets = ", ".join(f"{k}=?" for k in updates)
         params = list(updates.values()) + [route_id]
