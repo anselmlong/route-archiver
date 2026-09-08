@@ -10,8 +10,9 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent / "data" / "routes.db"
 
 # V-scale ordering for sorting. Higher index = harder. Capped at V8+ per the gym.
+# 'V?' / 'V' are wildcard routes with no grade — sort them lowest (unknown).
 V_ORDER = [
-    "VB", "V0", "V0+", "V1", "V1+", "V2", "V2+", "V3", "V3+",
+    "V?", "V", "VB", "V0", "V0+", "V1", "V1+", "V2", "V2+", "V3", "V3+",
     "V4", "V4+", "V5", "V5+", "V6", "V6+", "V7", "V7+", "V8", "V8+",
 ]
 _V_IDX = {g: i for i, g in enumerate(V_ORDER)}
@@ -35,11 +36,12 @@ WALL_ALIASES = {
     "slab": "Right", "slab (right)": "Right", "right (slab)": "Right",
 }
 
-# token-ish grade regex: VB, V0..V17, optional +, optional range.
-# Range second side may lack the V prefix (V3-4) and may use / or en-dash.
-# Grades above V8+ are accepted here then clamped by _clamp_grade().
+# token-ish grade regex: a real grade (VB/V0..V17, optional +, optional range)
+# OR a wildcard route with no grade (just 'V?' or a standalone 'V').
+# Ranges may lack the V prefix (V3-4) and use / or en-dash. Grades above V8+
+# are accepted here then clamped by _clamp_grade().
 _GRADE_RE = re.compile(
-    r"\bV(?:B|1[0-7]|[0-9])\+?(?:\s*[-/–]\s*V?(?:B|1[0-7]|[0-9])\+?)?",
+    r"\bV(?:(?:B|1[0-7]|[0-9])\+?(?:\s*[-/–]\s*V?(?:B|1[0-7]|[0-9])\+?)?|\?|(?![0-9A-Za-z]))",
     re.IGNORECASE,
 )
 
