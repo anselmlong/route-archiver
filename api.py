@@ -78,17 +78,6 @@ def validate_init_data(raw: str, max_age: int = 86400):
     return int(uid), name
 
 
-def _viewer_from_request(request: Request):
-    raw = request.headers.get("X-Telegram-Init-Data", "")
-    if not raw:
-        return None
-    try:
-        uid, _name = validate_init_data(raw)
-    except ValueError:
-        return None  # don't trust it; treat as anonymous
-    return uid
-
-
 # --------------------------------------------------------------------------- #
 # routes
 # --------------------------------------------------------------------------- #
@@ -99,14 +88,22 @@ def index():
 
 @app.get("/api/routes")
 def routes(grade: str | None = None, wall: str | None = None,
+           tg: str | None = None,  # type: ignore[assignment]  # optional initData
            request: "Request" = None):  # type: ignore[assignment]  # fastapi injects
     """Return routes optionally filtered by minimum grade or exact wall.
 
     Votes are attached; 'my_vote' is personalised when a valid Telegram
-    initData header is supplied (i.e. opened as the Mini App).
+    initData is supplied (as `tg` query param or X-Telegram-Init-Data header).
     """
     rows = storage.list_routes(grade=grade, wall=wall)
-    storage.attach_votes(rows, tg_user_id=_viewer_from_request(request))
+    viewer = None
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    if raw:
+        try:
+            viewer, _ = validate_init_data(raw)
+        except ValueError:
+            viewer = None
+    storage.attach_votes(rows, tg_user_id=viewer)
     for r in rows:
         r.pop("photo_path", None)
         r.pop("_id", None)
@@ -117,19 +114,20 @@ def routes(grade: str | None = None, wall: str | None = None,
 async def vote(route_id: int, request: Request):
     """Upvote (value=1) or downvote (value=-1) a route as the requester.
 
-    Requires a valid Telegram initData header so each Telegram account gets one
-    vote per route. Voting the same way again retracts the vote.
+    Requires Telegram initData (sent in the JSON body as `init_data`) so each
+    Telegram account gets one vote per route. Voting the same way again retracts.
     """
-    raw = request.headers.get("X-Telegram-Init-Data", "")
-    try:
-        uid, name = validate_init_data(raw)
-    except ValueError as e:
-        return JSONResponse(status_code=401, content={"error": str(e)})
-
     body = await request.json()
     value = body.get("value", 1)
     if value not in (1, -1):
         return JSONResponse(status_code=400, content={"error": "value must be 1 or -1"})
+
+    # accept initData from body (preferred, avoids header-length/escaping issues)
+    raw = body.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
+    try:
+        uid, name = validate_init_data(raw)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
 
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})

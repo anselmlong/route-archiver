@@ -28,13 +28,12 @@
   .seg button.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
   select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:13.5px}
 
-  /* grade range slider */
-  .range{display:flex;flex-direction:column;gap:2px;margin:6px 0 2px}
-  .range .labels{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px}
-  .range input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:24px;background:transparent;pointer-events:none}
-  .range input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);pointer-events:all;cursor:pointer}
-  .range input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);pointer-events:all;cursor:pointer}
-  .rangelabels{font-size:12px;color:var(--muted)}
+  /* min-grade slider */
+  .filters{display:flex;flex-direction:column;gap:2px;margin:6px 0 2px}
+  .minrow{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px}
+  #min{width:100%;-webkit-appearance:none;appearance:none;height:26px;background:var(--panel);border:1px solid var(--line);border-radius:13px;outline:none}
+  #min::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);cursor:pointer;margin-top:-1px}
+  #min::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--text);border:2px solid var(--accent);cursor:pointer}
 
   /* cards */
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin-top:12px}
@@ -86,10 +85,9 @@
     <select id="wall"><option value="">All walls</option></select>
   </div>
 
-  <div class="range">
-    <input type="range" id="lo" min="0" max="1" value="0" step="1">
-    <input type="range" id="hi" min="0" max="1" value="1" step="1">
-    <div class="labels"><span id="loLab"></span><span id="hiLab"></span></div>
+  <div class="filters">
+    <div class="minrow"><span id="minLab">All grades</span></div>
+    <input type="range" id="min" min="0" max="1" value="0" step="1">
   </div>
 
   <div class="grid" id="grid"></div>
@@ -112,7 +110,7 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const state={routes:[],sort:"grade",wall:"",lo:0,hi:0,grades:[],cur:null,initData:""};
+const state={routes:[],sort:"grade",wall:"",min:0,grades:[],cur:null,initData:""};
 
 (function tg(){
   if(window.Telegram&&window.Telegram.WebApp){
@@ -124,17 +122,15 @@ const state={routes:[],sort:"grade",wall:"",lo:0,hi:0,grades:[],cur:null,initDat
   }
 })();
 
-function hdrs(){const h={"Content-Type":"application/json"};if(state.initData)h["X-Telegram-Init-Data"]=state.initData;return h}
-
 async function load(){
-  const r=await fetch("/api/routes",{headers:hdrs()}).then(x=>x.json());
+  const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
+  const r=await fetch("/api/routes"+q).then(x=>x.json());
   const k=await fetch("/api/meta").then(x=>x.json());
   state.routes=r.routes; state.grades=["all",...k.grades];
-  state.hi=state.grades.length-1;
-  $("#lo").max=state.hi;$("#hi").max=state.hi;
-  $("#lo").value=0;$("#hi").value=state.hi;
+  $("#min").max=state.grades.length-1;
   setWallOptions(k.walls);
   paint();
+  updateMinLab();
 }
 
 function setWallOptions(walls){
@@ -143,18 +139,17 @@ function setWallOptions(walls){
 }
 
 function gi(i){return state.grades[i]}
-function displayGrade(g){return g==="all"?"Any":g}
+function gradeIdx(g){ // index of a route's grade within the real scale
+  if(g==="V?"||g==="V")return -1;             // wildcard: below everything
+  const real=state.grades.slice(1);           // grade scale without "all"
+  return real.indexOf(g);                     // 0-based within real scale
+}
 
 function filtered(){
   let l=state.routes;
   if(state.wall)l=l.filter(r=>r.wall===state.wall);
-  const lo=gi(state.lo),hi=gi(state.hi);
-  // map selected grades to a comparable index using grade_low
-  const loIdx=state.grades.indexOf(lo)-1; // index within real scale
-  const hiIdx=state.grades.indexOf(hi)-1;
-  // special: "all" (loIdx=-1) means no lower bound; wildcards (grade_low<0)
-  if(loIdx>=0)l=l.filter(r=>r.grade_low>=loIdx);
-  if(hiIdx<state.grades.length-2)l=l.filter(r=>r.grade_low<=hiIdx);
+  const minIdx=state.min-1;                   // grade_low threshold (all => -1)
+  if(minIdx>=0)l=l.filter(r=>r.grade_low>=minIdx&&r.grade_low!==-1);
   if(state.sort==="new")l=[...l].sort((a,b)=>b.created_at.localeCompare(a.created_at));
   else l=[...l].sort((a,b)=>b.grade_low-a.grade_low||b.created_at.localeCompare(a.created_at));
   return l;
@@ -163,8 +158,7 @@ function filtered(){
 function paint(){
   const list=filtered();
   $("#count").textContent=list.length+" route"+(list.length===1?"":"s");
-  const grid=$("#grid"),
-        empty=$("#empty");
+  const grid=$("#grid"), empty=$("#empty");
   empty.hidden=!!list.length;
   grid.innerHTML=list.map(r=>`
     <div class="card" data-id="${r.id}">
@@ -189,13 +183,11 @@ function paint(){
   grid.querySelectorAll(".vbtn").forEach(b=>{
     b.onclick=e=>{e.stopPropagation();vote(Number(b.closest(".card").dataset.id),Number(b.dataset.v))};
   });
-  paintSlider();
 }
 
-function paintSlider(){
-  const loV=displayGrade(gi(state.lo)),hiV=displayGrade(gi(state.hi));
-  $("#loLab").textContent=loV+"+";
-  $("#hiLab").textContent="≤ "+hiV;
+function updateMinLab(){
+  const g=gi(state.min);
+  $("#minLab").textContent=(g==="all")?"All grades":(g+" or harder");
 }
 
 function sc(s){return s>0?"pos":(s<0?"neg":"")}
@@ -203,7 +195,7 @@ function sc(s){return s>0?"pos":(s<0?"neg":"")}
 async function vote(id,val){
   if(!state.initData){alert("Open via Telegram to vote (one vote per account).");return}
   try{
-    const res=await fetch(`/api/vote/${id}`,{method:"POST",headers:hdrs(),body:JSON.stringify({value:val})});
+    const res=await fetch(`/api/vote/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json();
     if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
     const r=state.routes.find(x=>x.id===id);
@@ -237,8 +229,8 @@ $("#sortseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   paint();
 });
 $("#wall").onchange=e=>{state.wall=e.target.value;paint()};
-$("#lo").oninput=e=>{if(+e.target.value>state.hi)e.target.value=state.hi;state.lo=+e.target.value;paint()};
-$("#hi").oninput=e=>{if(+e.target.value<state.lo)e.target.value=state.lo;state.hi=+e.target.value;paint()};
+$("#min").oninput=e=>{state.min=+e.target.value;updateMinLab()};
+$("#min").onchange=e=>{state.min=+e.target.value;updateMinLab();paint()};
 $("#sUp").onclick=()=>state.cur&&vote(state.cur.id,1);
 $("#sDn").onclick=()=>state.cur&&vote(state.cur.id,-1);
 
