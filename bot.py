@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -64,8 +64,15 @@ def _route_line(r: dict) -> str:
 
 
 def _app_link(r: dict) -> InlineKeyboardMarkup:
-    """WebApp button that opens the collection as a Telegram Mini App."""
-    kb = [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]]
+    """Button that opens the collection (in-app browser viewport).
+
+    NOTE: an inline `web_app` button would open as a true full-screen Mini App,
+    but that requires the domain to be registered with the bot via @BotFather
+    (/newapp) first — unregistered domains get 'Button_type_invalid'. So inline
+    buttons use a plain URL for now; the native Mini App entry is the bot's menu
+    button (set via set_chat_menu_button), which needs no registration.
+    """
+    kb = [[InlineKeyboardButton("🗂 Open collection", url=APP_BASE)]]
     return InlineKeyboardMarkup(kb)
 
 
@@ -176,7 +183,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route_id}"),
         ]
     ]
-    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", web_app=WebAppInfo(url=APP_BASE))]])
+    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=APP_BASE)]])
 
     await msg.reply_text(
         f"✅ Archived *{route['name']}* — {route['grade']}"
