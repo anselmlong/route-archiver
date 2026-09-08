@@ -15,6 +15,14 @@ V_ORDER = [
     "V4", "V4+", "V5", "V5+", "V6", "V6+", "V7", "V7+", "V8", "V8+",
 ]
 _V_IDX = {g: i for i, g in enumerate(V_ORDER)}
+MAX_IDX = _V_IDX["V8+"]  # anything harder than this gets clamped to V8+
+
+# fuller accepted scale for parsing; grades above V8+ are clamped, not rejected
+_FULL = V_ORDER + [
+    "V9", "V9+", "V10", "V10+", "V11", "V11+", "V12", "V12+",
+    "V13", "V13+", "V14", "V14+", "V15", "V15+", "V16", "V16+", "V17",
+]
+_FULL_IDX = {g: i for i, g in enumerate(_FULL)}
 
 # canonical wall sections (the three the gym uses) + common aliases
 WALL_ALIASES = {
@@ -27,9 +35,10 @@ WALL_ALIASES = {
     "right slab": "right slab", "slab": "right slab",
 }
 
-# token-ish grade regex: VB, V0..V8, optional +, optional / Vx range
+# token-ish grade regex: VB, V0..V17, optional +, optional / Vx range.
+# Grades above V8+ are accepted here then clamped by _clamp_grade().
 _GRADE_RE = re.compile(
-    r"\bV(?:B|[0-8])\s*\+?\s*(?:[/-]\s*V(?:B|[0-8])\s*\+?)?",
+    r"\bV(?:B|(?:1[0-7])|[0-9])\s*\+?\s*(?:[/-]\s*V(?:B|(?:1[0-7])|[0-9])\s*\+?)?",
     re.IGNORECASE,
 )
 
@@ -47,6 +56,15 @@ def _grade_low(display: str) -> int:
     """Lower-bound sort index for a (possibly ranged) grade display."""
     parts = re.split(r"[/-]", display)
     return _V_IDX[parts[0]]
+
+
+def _clamp_grade(display):
+    """Clamp any grade harder than V8+ down to V8+ (display + sort index)."""
+    parts = re.split(r"[/-]", display)
+    indices = [_FULL_IDX[p] for p in parts]
+    if max(indices) > MAX_IDX:
+        return "V8+", MAX_IDX
+    return display, _grade_low(display)
 
 
 def _norm_wall(w):
@@ -71,8 +89,10 @@ def parse_caption(caption: str) -> dict:
     raw = m.group(0)
     grade_display = _norm_grade(raw)
     for part in re.split(r"[/-]", grade_display):
-        if part not in _V_IDX:
+        if part not in _FULL_IDX:
             raise GradeError(f"unsupported grade {part}")
+    # clamp any grade harder than V8+ down to V8+
+    grade_display, grade_low = _clamp_grade(grade_display)
 
     # name = everything before the grade token; wall = everything after
     before = caption[: m.start()].strip(" /-,;:")
@@ -94,7 +114,7 @@ def parse_caption(caption: str) -> dict:
     return {
         "name": before,
         "grade": grade_display,
-        "grade_low": _grade_low(grade_display),
+        "grade_low": grade_low,
         "wall": _norm_wall(wall),
     }
 
@@ -166,7 +186,9 @@ class Storage:
         if not updates:
             return self.get_route(route_id)
         if "grade" in updates and "grade_low" not in updates:
-            updates["grade_low"] = _grade_low(str(updates["grade"]))
+            updates["grade"], updates["grade_low"] = _clamp_grade(
+                _norm_grade(str(updates["grade"]))
+            )
         sets = ", ".join(f"{k}=?" for k in updates)
         params = list(updates.values()) + [route_id]
         with self._lock, self._connect() as conn:

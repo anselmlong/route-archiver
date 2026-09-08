@@ -1,4 +1,4 @@
-"""Quick smoke test for the caption parser."""
+"""Quick smoke test for the caption parser (incl. clamping)."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -9,9 +9,10 @@ for cap in ["Crack Line / V4+ / left vertical",
             "Overhang Dyno / V8+ / right slab",
             "Warmup V2/V3 left",
             "Project #1 / V7 / Cave",
-            "Too Hard V9 right",        # above V8+ -> rejected
+            "Sick Boulders / V9 / middle overhang",    # clamped -> V8+
+            "Mega Line / V12+ / right slab",           # clamped -> V8+
             "no grade here"]:
     try:
-        print(repr(cap), "->", parse_caption(cap))
+        print(f"{cap!r} -> {parse_caption(cap)}")
     except GradeError as e:
-        print(repr(cap), "-> GradeError:", e)
+        print(f"{cap!r} -> GradeError: {e}")
