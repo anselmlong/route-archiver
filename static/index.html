@@ -31,7 +31,7 @@
   .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;
     display:flex;flex-direction:column;box-shadow:0 2px 6px rgba(0,0,0,.25);cursor:pointer;transition:transform .08s}
   .card:active{transform:scale(.98)}
-  .card img{width:100%;aspect-ratio:3/4;object-fit:cover;background:var(--panel2);display:block}
+  .card img{width:100%;height:auto;object-fit:contain;background:var(--panel2);display:block}
   .card .meta{padding:10px;display:flex;flex-direction:column;gap:3px}
   .card .name{font-weight:600;font-size:.92rem;line-height:1.2}
   .card .grade{color:var(--accent);font-weight:700;font-size:.9rem}
@@ -47,7 +47,7 @@
   .sheet{background:var(--panel);width:100%;max-width:560px;border-radius:20px 20px 0 0;
     max-height:92vh;overflow-y:auto;animation:up .18s ease}
   @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
-  .sheet img{width:100%;max-height:62vh;object-fit:cover;display:block;background:var(--panel2)}
+  .sheet img{width:100%;max-height:62vh;object-fit:contain;display:block;background:var(--panel2)}
   .sheet .body{padding:16px}
   .sheet h2{font-size:1.25rem;letter-spacing:-.01em}
   .sheet .badges{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
