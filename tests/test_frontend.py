@@ -337,47 +337,34 @@ def test_tick_without_telegram_context_prompts_alert(page):
     assert dialog_messages, "expected an alert() prompting to open via Telegram"
 
 
-def test_status_toggle_defaults_to_on_the_wall_hiding_retired(page):
-    on_wall_btn = page.locator('[data-status="active"]')
-    all_time_btn = page.locator('[data-status="all"]')
-    assert "on" in (on_wall_btn.get_attribute("class") or "")
-    assert "on" not in (all_time_btn.get_attribute("class") or "")
+def test_browse_always_hides_retired_routes(page):
+    """Browse has no on-the-wall/all-time toggle -- it only ever shows
+    active routes; retired ones only surface in views that explicitly
+    include history (Mine, Hot)."""
     names = page.locator(".nm").all_inner_texts()
     assert "Stripped Slab" not in names
+    assert page.locator(".card").count() == 2
 
 
-def test_status_toggle_all_time_shows_retired_with_badge(page):
-    page.locator('[data-status="all"]').click()
-    page.wait_for_function("document.querySelectorAll('.card').length === 3")
-    assert page.locator('[data-status="all"]').get_attribute("class").find("on") >= 0
-
-    retired_card = page.locator(".card", has_text="Stripped Slab")
-    assert retired_card.locator(".retired").count() == 1
-
-    active_card = page.locator(".card", has_text="Crack Line")
-    assert active_card.locator(".retired").count() == 0
-
-    # switching back to "on the wall" drops it again
-    page.locator('[data-status="active"]').click()
-    page.wait_for_function("document.querySelectorAll('.card').length === 2")
-
-
-def test_retired_badge_shown_in_detail_sheet(page):
-    page.locator('[data-status="all"]').click()
-    page.wait_for_function("document.querySelectorAll('.card').length === 3")
-    page.locator(".card", has_text="Stripped Slab").click()
-    page.wait_for_selector(".scrim.open")
-    assert page.locator("#sretired").is_visible()
+def test_retired_badge_shown_in_detail_sheet(authed_page):
+    # Stripped Slab is retired but still shows up in Mine (authed_page's
+    # user ticked it before it came down) -- that's how we reach a
+    # retired route's sheet now that Browse never shows one
+    authed_page.locator('[data-view="mine"]').click()
+    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    authed_page.locator(".card", has_text="Stripped Slab").click()
+    authed_page.wait_for_selector(".scrim.open")
+    assert authed_page.locator("#sretired").is_visible()
     # text-transform:uppercase in CSS -- innerText reflects the rendered case
-    assert page.locator("#sretired").inner_text() == "RETIRED"
+    assert authed_page.locator("#sretired").inner_text() == "RETIRED"
 
     # the sheet visually covers the scrim, so close it via a direct DOM
     # click rather than fighting Playwright's hit-testing
-    page.eval_on_selector("#scrim", "el => el.click()")
-    page.wait_for_selector(".scrim:not(.open)", state="attached")
-    page.locator(".card", has_text="Crack Line").click()
-    page.wait_for_selector(".scrim.open")
-    assert not page.locator("#sretired").is_visible()
+    authed_page.eval_on_selector("#scrim", "el => el.click()")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    assert not authed_page.locator("#sretired").is_visible()
 
 
 # --------------------------------------------------------------------------- #

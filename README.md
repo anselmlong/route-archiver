@@ -27,9 +27,10 @@ they just keep posting route pics.
     confirmation showing the count first.
   - the 🪨 Retire / ♻️ Restore button on each route's message toggles a
     single route without a full section reset.
-  - retired routes keep their ratings/ticks and stay in the mini-app's
-    "All-time" view (toggle next to "On the wall") — a climber's send
-    history doesn't vanish just because the route came down.
+  - retired routes keep their ratings/ticks and stay visible in a
+    climber's own history (Mine, Hot) — a route coming down doesn't erase
+    that you climbed it. Browse itself only ever shows what's currently
+    on the wall.
 - **Personal logbook** — `/mine` (bot) or the mini-app's "Mine" tab shows
   your own send history: total sends, hardest grade, a grade pyramid, and
   the actual routes (including retired ones you climbed before they came
