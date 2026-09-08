@@ -8,7 +8,7 @@ Runs as a systemd service (see route-archiver.service). No cron, no Hermes.
 """
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -21,7 +21,7 @@ from telegram.ext import (
     filters,
 )
 
-from storage import GradeError, Storage, parse_caption
+from storage import GradeError, Storage, _norm_wall, parse_caption
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("routes-bot")
@@ -68,6 +68,43 @@ def _app_link(r: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(kb)
 
 
+async def _topic_wall(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, thread_id: int):
+    """Return the canonical wall for a forum topic, or None.
+
+    Resolves the topic name via the raw getForumTopics API (the python lib
+    doesn't wrap the lookup) and maps it through WALL_ALIASES. Cached in
+    ctx.bot_data per (chat, thread) with a TTL so we don't hammer the API.
+    """
+    if not thread_id or thread_id == chat_id:
+        return None  # General topic (or no topic) — not a named wall
+
+    cache = ctx.bot_data.setdefault("topic_cache", {})
+    key = (chat_id, thread_id)
+    hit = cache.get(key)
+    if hit and datetime.now(timezone.utc) - hit["t"] < timedelta(hours=6):
+        return hit["wall"]
+
+    title = None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/getForumTopics",
+                json={"chat_id": chat_id, "limit": 100},
+            )
+            r.raise_for_status()
+            for t in r.json().get("result", {}).get("forum_topics", []):
+                if t.get("message_thread_id") == thread_id:
+                    title = t.get("name")
+                    break
+    except Exception as e:
+        log.warning("getForumTopics failed: %s", e)
+
+    wall = _norm_wall(title) if title else None
+    cache[key] = {"wall": wall, "t": datetime.now(timezone.utc)}
+    return wall
+
+
 # --------------------------------------------------------------------------- #
 # photo detection (the core flow — zero behavior change for setters)
 # --------------------------------------------------------------------------- #
@@ -92,6 +129,14 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         log.info("skip (unparsed): %s — %s", caption, e)
         return
 
+    # resolve wall: forum topic wins over caption wall, else caption, else none
+    wall = parsed["wall"]
+    thread_id = getattr(msg, "message_thread_id", None)
+    if thread_id and thread_id != msg.chat.id:
+        topic_wall = await _topic_wall(ctx, msg.chat.id, thread_id)
+        if topic_wall:
+            wall = topic_wall
+
     # download the largest photo
     photo = msg.photo[-1]
     fid = photo.file_id
@@ -115,7 +160,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         name=parsed["name"],
         grade=parsed["grade"],
         grade_low=parsed["grade_low"],
-        wall=parsed["wall"],
+        wall=wall,
         photo_path=str(dest) if dest else None,
         photo_fid=fid,
         setter_name=setter_name,
@@ -148,9 +193,11 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
         "🧗 *NUS USC Routes*\n\n"
-        "Setters: just post a photo with its name + grade, e.g.\n"
-        "`Crack Line / V4+ / left vertical`\n\n"
-        "I archive it automatically and add it to the collection.",
+        "Setters: post a photo of a route with its name + grade.\n"
+        "`Crack Line V4`\n"
+        "Post it in the topic for its wall (left / overhang / slab) and I'll\n"
+        "tag the wall automatically.\n\n"
+        "Tap for the full collection.",
         parse_mode="Markdown",
         reply_markup=_app_link({}),
     )
