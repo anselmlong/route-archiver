@@ -311,6 +311,22 @@ class Storage:
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_comments_route ON comments(route_id)")
+            # new-route alerts: one subscription per Telegram user, set up
+            # via a private DM with the bot (the only chat Telegram lets a
+            # bot message into later without the user speaking first)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tg_user_id    INTEGER NOT NULL UNIQUE,
+                    tg_chat_id    INTEGER NOT NULL,
+                    min_grade_low INTEGER,
+                    wall          TEXT,
+                    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
             # legacy up/down votes table is gone; drop any stale one from an old deploy
             conn.execute("DROP TABLE IF EXISTS votes")
 
@@ -715,6 +731,49 @@ class Storage:
                 (f"%{name}%",),
             ).fetchone()
         return row["setter_id"] if row else None
+
+    # ---- new-route alerts ---------------------------------------------
+    def subscribe(self, tg_user_id, tg_chat_id, min_grade_low=None, wall=None):
+        """Set (or replace) a user's new-route alert preferences. One
+        subscription per user -- calling again overwrites the old one."""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO subscriptions (tg_user_id, tg_chat_id, min_grade_low, wall)
+                VALUES (?,?,?,?)
+                ON CONFLICT(tg_user_id) DO UPDATE SET
+                    tg_chat_id=excluded.tg_chat_id,
+                    min_grade_low=excluded.min_grade_low,
+                    wall=excluded.wall,
+                    updated_at=datetime('now')
+                """,
+                (tg_user_id, tg_chat_id, min_grade_low, wall),
+            )
+
+    def unsubscribe(self, tg_user_id):
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM subscriptions WHERE tg_user_id=?", (tg_user_id,))
+
+    def get_subscription(self, tg_user_id):
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM subscriptions WHERE tg_user_id=?", (tg_user_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def matching_subscribers(self, grade_low, wall):
+        """Subscriptions whose preferences match a newly-archived route.
+        A subscription with min_grade_low=NULL matches any grade
+        (wildcard routes, grade_low=-1, included); wall=NULL matches any
+        wall."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM subscriptions WHERE "
+                "(min_grade_low IS NULL OR ? >= min_grade_low) "
+                "AND (wall IS NULL OR wall = ?)",
+                (grade_low, wall),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def attach_ratings_and_ticks(self, routes, tg_user_id=None):
         """Mutate route dicts in place: avg/count/my_rating, tick_count/my_tick."""

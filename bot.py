@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import Forbidden
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -23,7 +24,7 @@ from telegram.ext import (
     filters,
 )
 
-from storage import GradeError, Storage, WILD_LOW, _norm_wall, parse_caption
+from storage import GradeError, Storage, V_ORDER, WILD_LOW, _norm_wall, _V_IDX, parse_caption
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("routes-bot")
@@ -258,6 +259,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=kb,
     )
+    await _notify_subscribers(ctx, route, wall)
 
 
 async def on_topic_event(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -292,7 +294,9 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/leaderboard — top climbers & setters\n"
         "/hot — what's hot this week\n"
         "/setter <name> — a setter's profile\n"
-        "/search <name or setter> — find a route\n\n"
+        "/search <name or setter> — find a route\n"
+        "/notify [grade] [wall] — DM me new routes matching your taste "
+        "(only works in a private chat with me, not here)\n\n"
         "Tap for the full collection.",
         parse_mode="Markdown",
         reply_markup=_app_link({}),
@@ -448,6 +452,83 @@ async def cmd_setter(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
         "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
     )
+
+
+async def cmd_notify(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Get a DM when a new route matching your preferences is archived:
+    /notify [grade] [wall] | off (no args shows your current status).
+
+    Only works as a private message to the bot -- Telegram never lets a
+    bot message someone who hasn't spoken to it first, so there's no way
+    to set this up from inside the group.
+    """
+    chat = update.effective_chat
+    user = update.effective_user
+    if not user or not chat:
+        return
+    if chat.type != "private":
+        await update.effective_message.reply_text(
+            "DM me and run /notify there — I can only message you later if "
+            "you've started a private chat with me first."
+        )
+        return
+
+    args = ctx.args or []
+    if not args:
+        sub = storage.get_subscription(user.id)
+        if not sub:
+            await update.effective_message.reply_text(
+                "You're not subscribed. /notify V4 left for new V4+ routes "
+                "on the left wall, or just /notify for everything."
+            )
+            return
+        grade = V_ORDER[sub["min_grade_low"]] + "+" if sub["min_grade_low"] is not None else "any grade"
+        wall = sub["wall"] or "any wall"
+        await update.effective_message.reply_text(
+            f"You're subscribed: {grade} on {wall}. /notify off to stop."
+        )
+        return
+
+    if args[0].lower() == "off":
+        storage.unsubscribe(user.id)
+        await update.effective_message.reply_text("Unsubscribed.")
+        return
+
+    min_grade_low, wall = None, None
+    for a in args:
+        if a.upper() in _V_IDX:
+            min_grade_low = _V_IDX[a.upper()]
+        else:
+            canon = _canon_wall_arg(a)
+            if canon:
+                wall = canon
+    storage.subscribe(user.id, chat.id, min_grade_low=min_grade_low, wall=wall)
+    grade_label = V_ORDER[min_grade_low] + "+" if min_grade_low is not None else "any grade"
+    wall_label = wall or "any wall"
+    await update.effective_message.reply_text(
+        f"✅ Subscribed: {grade_label} on {wall_label}. /notify off to stop."
+    )
+
+
+async def _notify_subscribers(ctx: ContextTypes.DEFAULT_TYPE, route: dict, wall):
+    """DM everyone whose /notify preferences match a newly-archived
+    route. Best-effort: a user who has blocked the bot gets silently
+    unsubscribed instead of failing the archive flow."""
+    subs = storage.matching_subscribers(route["grade_low"], wall)
+    if not subs:
+        return
+    text = (
+        f"🔔 New route matching your alert: *{_md_escape(route['name'])}* — {route['grade']}"
+        + (f" · {_md_escape(wall)}" if wall else "")
+        + "\n/notify off to stop these."
+    )
+    for sub in subs:
+        try:
+            await ctx.bot.send_message(sub["tg_chat_id"], text, parse_mode="Markdown")
+        except Forbidden:
+            storage.unsubscribe(sub["tg_user_id"])
+        except Exception as e:
+            log.warning("notify failed for %s: %s", sub["tg_user_id"], e)
 
 
 # --------------------------------------------------------------------------- #
@@ -688,6 +769,7 @@ def run():
     app.add_handler(CommandHandler("hot", cmd_hot))
     app.add_handler(CommandHandler("setter", cmd_setter))
     app.add_handler(CommandHandler("search", cmd_search))
+    app.add_handler(CommandHandler("notify", cmd_notify))
     app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("reset", cmd_reset))

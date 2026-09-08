@@ -625,3 +625,67 @@ def test_comment_count_excludes_deleted(storage):
     rows = storage.list_routes()
     storage.attach_ratings_and_ticks(rows)
     assert rows[0]["comment_count"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Storage: new-route alert subscriptions
+# --------------------------------------------------------------------------- #
+def test_subscribe_then_get_subscription(storage):
+    storage.subscribe(1, 111, min_grade_low=5, wall="Left")
+    sub = storage.get_subscription(1)
+    assert sub["tg_chat_id"] == 111
+    assert sub["min_grade_low"] == 5
+    assert sub["wall"] == "Left"
+
+
+def test_subscribe_defaults_to_any_grade_any_wall(storage):
+    storage.subscribe(1, 111)
+    sub = storage.get_subscription(1)
+    assert sub["min_grade_low"] is None
+    assert sub["wall"] is None
+
+
+def test_get_subscription_none_when_not_subscribed(storage):
+    assert storage.get_subscription(999) is None
+
+
+def test_subscribe_again_overwrites_not_duplicates(storage):
+    storage.subscribe(1, 111, min_grade_low=5, wall="Left")
+    storage.subscribe(1, 222, min_grade_low=7, wall="Right")
+    sub = storage.get_subscription(1)
+    assert sub["tg_chat_id"] == 222
+    assert sub["min_grade_low"] == 7
+    assert sub["wall"] == "Right"
+
+
+def test_unsubscribe_removes_it(storage):
+    storage.subscribe(1, 111)
+    storage.unsubscribe(1)
+    assert storage.get_subscription(1) is None
+
+
+def test_unsubscribe_when_never_subscribed_is_a_noop(storage):
+    storage.unsubscribe(999)  # must not raise
+
+
+def test_matching_subscribers_grade_and_wall_filters(storage):
+    storage.subscribe(1, 111, min_grade_low=5, wall="Left")   # V4+ on Left
+    storage.subscribe(2, 222)                                  # anything
+    matches = {s["tg_user_id"] for s in storage.matching_subscribers(5, "Left")}
+    assert matches == {1, 2}
+    too_easy = {s["tg_user_id"] for s in storage.matching_subscribers(2, "Left")}
+    assert too_easy == {2}
+    wrong_wall = {s["tg_user_id"] for s in storage.matching_subscribers(7, "Right")}
+    assert wrong_wall == {2}
+
+
+def test_matching_subscribers_any_grade_includes_wildcard_routes(storage):
+    from storage import WILD_LOW
+    storage.subscribe(1, 111)  # any grade, any wall
+    matches = {s["tg_user_id"] for s in storage.matching_subscribers(WILD_LOW, None)}
+    assert matches == {1}
+
+
+def test_matching_subscribers_specific_wall_excludes_wallless_route(storage):
+    storage.subscribe(1, 111, wall="Left")
+    assert storage.matching_subscribers(5, None) == []

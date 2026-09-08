@@ -56,6 +56,12 @@ they just keep posting route pics.
   fit a bot command well). Flat, chronological, 500 chars max. Anyone can
   read; only the author can delete their own comment -- moderating
   someone else's is an admin/bot-side action, not exposed here.
+- **New-route alerts** — `/notify [grade] [wall]` in a **private DM with
+  the bot** (Telegram never lets a bot message someone who hasn't spoken
+  to it first, so this can't be set up from inside the group) subscribes
+  you to a DM whenever a matching route is archived; `/notify off` stops
+  them, plain `/notify` shows your current subscription. A user who
+  blocks the bot is silently unsubscribed on the next send.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |
