@@ -46,6 +46,10 @@ def live_server(tmp_path, monkeypatch):
     s.set_rating(r1["id"], tg_user_id=1, tg_user_name="A", value=5)
     s.toggle_tick(r1["id"], tg_user_id=1, tg_user_name="A", suggested_grade="V4")
 
+    r3 = s.add_route(name="Stripped Slab", grade="V2", grade_low=2, wall="Left",
+                      photo_path=str(photo))
+    s.retire_route(r3["id"])
+
     port = _free_port()
     config = uvicorn.Config(api_mod.app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config)
@@ -62,7 +66,7 @@ def live_server(tmp_path, monkeypatch):
     else:
         raise RuntimeError("live server never came up")
 
-    yield {"base_url": base_url, "route1": r1, "route2": r2, "storage": s}
+    yield {"base_url": base_url, "route1": r1, "route2": r2, "route3_retired": r3, "storage": s}
 
     server.should_exit = True
     thread.join(timeout=5)
@@ -168,6 +172,19 @@ def test_opening_card_shows_detail_sheet(page):
     assert "1 ascent" in page.locator("#sascent").inner_text()
 
 
+def test_sheet_is_hidden_and_non_interactive_until_a_card_is_opened(page):
+    """Regression test: the bottom sheet is `position:fixed` at the bottom
+    of the viewport: without an explicit hidden state it stays in the
+    layout and intercepts clicks on whatever's underneath even when
+    logically 'closed' (only the scrim backdrop used to toggle)."""
+    assert not page.locator("#sheet").is_visible()
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    assert page.locator("#sheet").is_visible()
+    page.eval_on_selector("#scrim", "el => el.click()")
+    assert not page.locator("#sheet").is_visible()
+
+
 def test_rating_without_telegram_context_prompts_alert_not_a_request(page):
     """Outside of Telegram, state.initData is empty; tapping a star should
     surface the explanatory alert and must NOT hit the network."""
@@ -197,3 +214,46 @@ def test_tick_without_telegram_context_prompts_alert(page):
     page.locator("#stck").click()
     page.wait_for_timeout(150)
     assert dialog_messages, "expected an alert() prompting to open via Telegram"
+
+
+def test_status_toggle_defaults_to_on_the_wall_hiding_retired(page):
+    on_wall_btn = page.locator('[data-status="active"]')
+    all_time_btn = page.locator('[data-status="all"]')
+    assert "on" in (on_wall_btn.get_attribute("class") or "")
+    assert "on" not in (all_time_btn.get_attribute("class") or "")
+    names = page.locator(".nm").all_inner_texts()
+    assert "Stripped Slab" not in names
+
+
+def test_status_toggle_all_time_shows_retired_with_badge(page):
+    page.locator('[data-status="all"]').click()
+    page.wait_for_function("document.querySelectorAll('.card').length === 3")
+    assert page.locator('[data-status="all"]').get_attribute("class").find("on") >= 0
+
+    retired_card = page.locator(".card", has_text="Stripped Slab")
+    assert retired_card.locator(".retired").count() == 1
+
+    active_card = page.locator(".card", has_text="Crack Line")
+    assert active_card.locator(".retired").count() == 0
+
+    # switching back to "on the wall" drops it again
+    page.locator('[data-status="active"]').click()
+    page.wait_for_function("document.querySelectorAll('.card').length === 2")
+
+
+def test_retired_badge_shown_in_detail_sheet(page):
+    page.locator('[data-status="all"]').click()
+    page.wait_for_function("document.querySelectorAll('.card').length === 3")
+    page.locator(".card", has_text="Stripped Slab").click()
+    page.wait_for_selector(".scrim.open")
+    assert page.locator("#sretired").is_visible()
+    # text-transform:uppercase in CSS -- innerText reflects the rendered case
+    assert page.locator("#sretired").inner_text() == "RETIRED"
+
+    # the sheet visually covers the scrim, so close it via a direct DOM
+    # click rather than fighting Playwright's hit-testing
+    page.eval_on_selector("#scrim", "el => el.click()")
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    assert not page.locator("#sretired").is_visible()

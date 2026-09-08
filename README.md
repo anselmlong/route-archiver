@@ -20,6 +20,16 @@ they just keep posting route pics.
   tap a route for the full photo + setter name.
 - **Admin CRUD** — admins can edit/delete routes from the inline buttons on the
   archived confirmation, or `/routes` to list them.
+- **Route lifecycle** — spray wall routes get physically stripped and re-set,
+  which isn't a mistake, so it's tracked separately from admin deletes:
+  - `/reset left | middle | right | all` bulk-retires every currently active
+    route on a wall (or the whole gym) in one shot, with a Yes/Cancel
+    confirmation showing the count first.
+  - the 🪨 Retire / ♻️ Restore button on each route's message toggles a
+    single route without a full section reset.
+  - retired routes keep their ratings/ticks and stay in the mini-app's
+    "All-time" view (toggle next to "On the wall") — a climber's send
+    history doesn't vanish just because the route came down.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |

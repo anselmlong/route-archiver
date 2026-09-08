@@ -98,6 +98,35 @@ def _app_link(r: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(kb)
 
 
+# canonical wall arg parsing, shared by /wall and /reset
+_WALL_ARG_CANON = {"left": "Left", "middle": "Middle", "right": "Right",
+                    "l": "Left", "m": "Middle", "r": "Right"}
+
+
+def _canon_wall_arg(raw: str):
+    return _WALL_ARG_CANON.get(raw.strip().lower())
+
+
+def _route_admin_buttons(route: dict) -> InlineKeyboardMarkup:
+    """Edit/Delete/Retire quick actions attached to a route's message.
+
+    These stay live on the original message indefinitely (Telegram
+    callback_data is just re-looked-up against the DB, no in-memory
+    session), so an admin can scroll back and retire/delete a route weeks
+    after it was posted.
+    """
+    retire_label = "♻️ Restore" if route.get("retired_at") else "🪨 Retire"
+    rows = [
+        [
+            InlineKeyboardButton("✏️ Edit", callback_data=f"edit:{route['id']}"),
+            InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route['id']}"),
+        ],
+        [InlineKeyboardButton(retire_label, callback_data=f"retire:{route['id']}")],
+        [InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
 async def _topic_wall(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, thread_id: int):
     """Return the wall for a forum topic.
 
@@ -191,7 +220,6 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     photo = msg.photo[-1]
     fid = photo.file_id
     afile = await ctx.bot.get_file(fid)
-    route_id = None
     suffix = Path(afile.file_path or "").suffix or ".jpg"
     dest = PHOTO_DIR / f"{fid}{suffix}"
     try:
@@ -217,16 +245,8 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         setter_name=setter_name,
         setter_id=setter_id,
     )
-    route_id = route["id"]
-
     # admin quick actions on the confirmation
-    buttons = [
-        [
-            InlineKeyboardButton("✏️ Edit", callback_data=f"edit:{route_id}"),
-            InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route_id}"),
-        ]
-    ]
-    kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)]])
+    kb = _route_admin_buttons(route)
 
     desc = f"\n📝 {_md_escape(route['description'])}" if route.get("description") else ""
     await msg.reply_text(
@@ -295,6 +315,8 @@ async def cmd_routes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(_route_line(r))
     if len(routes) > 30:
         lines.append(f"\n…and {len(routes)-30} more. Open the collection for all.")
+    stats = storage.stats()
+    lines.append(f"\n_{stats['active']} active · {stats['retired']} retired all-time_")
     await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
@@ -328,8 +350,7 @@ async def cmd_wall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Usage: /wall left | middle | right")
         return
     raw = " ".join(args).strip().lower()
-    canon = {"left": "Left", "middle": "Middle", "right": "Right",
-             "l": "Left", "m": "Middle", "r": "Right"}.get(raw)
+    canon = _canon_wall_arg(raw)
     if not canon:
         await update.effective_message.reply_text("Wall must be left, middle or right.")
         return
@@ -337,6 +358,49 @@ async def cmd_wall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data.setdefault(str(chat.id), {})[str(thread_id)] = canon
     _save_json(TOPIC_WALLS_FILE, data)
     await update.effective_message.reply_text(f"✅ Topic -> *{canon}* wall. Photos here will tag {canon}.", parse_mode="Markdown")
+
+
+async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Bulk-retire every active route on a wall (or the whole gym):
+    /reset left | middle | right | all.
+
+    Mirrors a physical wall reset -- when a section gets stripped, every
+    route on it comes down at once. Confirms first since it can affect
+    many routes in one shot; retiring (unlike delete) is reversible one
+    route at a time via the 🪨/♻️ button on each route's message.
+    """
+    user = update.effective_user
+    if not user or not _is_admin(user.id):
+        await update.effective_message.reply_text("⛔ admins only.")
+        return
+    args = ctx.args or []
+    if not args:
+        await update.effective_message.reply_text("Usage: /reset left | middle | right | all")
+        return
+    raw = " ".join(args).strip().lower()
+    if raw == "all":
+        wall, label = None, "all walls"
+    else:
+        wall = _canon_wall_arg(raw)
+        if not wall:
+            await update.effective_message.reply_text("Wall must be left, middle, right, or all.")
+            return
+        label = wall
+
+    count = storage.count_active_routes(wall)
+    if count == 0:
+        await update.effective_message.reply_text(f"No active routes on {label} to retire.")
+        return
+
+    token = "ALL" if wall is None else wall
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Yes, retire them", callback_data=f"reset_yes:{token}"),
+        InlineKeyboardButton("Cancel", callback_data=f"reset_no:{token}"),
+    ]])
+    await update.effective_message.reply_text(
+        f"Retire {count} active route{'' if count == 1 else 's'} on *{_md_escape(label)}*?",
+        parse_mode="Markdown", reply_markup=kb,
+    )
 
 
 async def cmd_setchat(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -373,6 +437,25 @@ async def _delete_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_
 async def _do_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_id):
     storage.delete_route(route_id)
     await update.callback_query.edit_message_text("🗑 Deleted.")
+
+
+async def _toggle_retire(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_id):
+    route = storage.get_route(route_id)
+    if not route:
+        await update.callback_query.answer("Not found.")
+        return
+    if route.get("retired_at"):
+        route = storage.unretire_route(route_id)
+        await update.callback_query.answer("Restored to active.")
+    else:
+        route = storage.retire_route(route_id)
+        await update.callback_query.answer("Retired.")
+    try:
+        await update.callback_query.edit_message_reply_markup(
+            reply_markup=_route_admin_buttons(route)
+        )
+    except Exception as e:
+        log.warning("couldn't refresh retire button: %s", e)
 
 
 async def _edit_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_id):
@@ -438,6 +521,16 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Cancelled.")
     elif data.startswith("edit:"):
         await _edit_flow(update, ctx, int(data.split(":")[1]))
+    elif data.startswith("retire:"):
+        await _toggle_retire(update, ctx, int(data.split(":")[1]))
+    elif data.startswith("reset_yes:"):
+        token = data.split(":", 1)[1]
+        wall = None if token == "ALL" else token
+        n = storage.retire_wall(wall)
+        label = "all walls" if wall is None else wall
+        await q.edit_message_text(f"✅ Retired {n} route{'' if n == 1 else 's'} on {label}.")
+    elif data.startswith("reset_no:"):
+        await q.edit_message_text("Cancelled.")
 
 
 async def cmd_app(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -462,6 +555,7 @@ def run():
     app.add_handler(CommandHandler("routes", cmd_routes))
     app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("wall", cmd_wall))
+    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("setchat", cmd_setchat))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CallbackQueryHandler(on_callback))

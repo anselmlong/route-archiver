@@ -71,6 +71,59 @@ def test_meta_reports_grades_walls_count(client, api_module):
     assert "V8+" in body["grades"]
 
 
+def test_meta_reports_active_and_retired_counts(client, api_module):
+    a = _seed_route(api_module)
+    _seed_route(api_module, name="B")
+    api_module.storage.retire_route(a["id"])
+    body = client.get("/api/meta").json()
+    assert body["active_count"] == 1
+    assert body["retired_count"] == 1
+    assert body["count"] == 2
+
+
+def test_routes_defaults_to_active_only(client, api_module):
+    a = _seed_route(api_module, name="On the wall")
+    b = _seed_route(api_module, name="Stripped")
+    api_module.storage.retire_route(b["id"])
+    names = [r["name"] for r in client.get("/api/routes").json()["routes"]]
+    assert names == ["On the wall"]
+
+
+def test_routes_status_all_includes_retired(client, api_module):
+    a = _seed_route(api_module, name="On the wall")
+    b = _seed_route(api_module, name="Stripped")
+    api_module.storage.retire_route(b["id"])
+    names = {r["name"] for r in client.get("/api/routes", params={"status": "all"}).json()["routes"]}
+    assert names == {"On the wall", "Stripped"}
+
+
+def test_routes_status_retired_only(client, api_module):
+    a = _seed_route(api_module, name="On the wall")
+    b = _seed_route(api_module, name="Stripped")
+    api_module.storage.retire_route(b["id"])
+    names = [r["name"] for r in client.get("/api/routes", params={"status": "retired"}).json()["routes"]]
+    assert names == ["Stripped"]
+
+
+def test_routes_rejects_invalid_status_with_422(client, api_module):
+    _seed_route(api_module)
+    r = client.get("/api/routes", params={"status": "bogus"})
+    assert r.status_code == 422
+
+
+def test_retired_route_can_still_be_rated_and_ticked(client, api_module):
+    """A route coming down in a reset shouldn't erase anyone's ability to
+    log a send they made while it was still up."""
+    route = _seed_route(api_module)
+    api_module.storage.retire_route(route["id"])
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    r = client.post(f"/api/rate/{route['id']}", json={"value": 5, "init_data": raw})
+    assert r.status_code == 200
+    t = client.post(f"/api/tick/{route['id']}", json={"init_data": raw})
+    assert t.status_code == 200
+    assert t.json()["ticked"] is True
+
+
 def test_routes_hides_internal_fields(client, api_module):
     _seed_route(api_module)
     r = client.get("/api/routes")

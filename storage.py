@@ -5,6 +5,7 @@ mini-app API (reads), so keep this module free of any telegram/async I/O.
 import re
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "routes.db"
@@ -220,10 +221,16 @@ class Storage:
                 )
                 """
             )
-            # migrate older DBs that lack the description column
+            # migrate older DBs that lack the description/retired_at columns
             cols = {c[1] for c in conn.execute("PRAGMA table_info(routes)").fetchall()}
             if "description" not in cols:
                 conn.execute("ALTER TABLE routes ADD COLUMN description TEXT")
+            if "retired_at" not in cols:
+                # NULL = still on the wall; set when a wall reset (or a
+                # one-off swap) takes the route down. Distinct from
+                # `deleted`, which is for mis-posts -- a retired route keeps
+                # its ratings/ticks and stays in climbers' history.
+                conn.execute("ALTER TABLE routes ADD COLUMN retired_at TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_routes_grade ON routes(grade_low)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_routes_wall ON routes(wall)")
             # star ratings: one 1-5 rating per user per route
@@ -318,10 +325,69 @@ class Storage:
                     (route_id,),
                 )
 
-    def list_routes(self, grade=None, wall=None):
-        """Return active routes, newest first, optionally filtered."""
+    # ---- wall resets / route lifecycle ----------------------------------
+    def retire_route(self, route_id):
+        """Mark a single route retired (removed from the wall), keeping its
+        ratings/ticks. Reversible via unretire_route."""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE routes SET retired_at=datetime('now'), updated_at=datetime('now') "
+                "WHERE id=? AND deleted=0",
+                (route_id,),
+            )
+        return self.get_route(route_id)
+
+    def unretire_route(self, route_id):
+        """Restore a retired route to active (e.g. a mistaken /reset)."""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE routes SET retired_at=NULL, updated_at=datetime('now') WHERE id=? AND deleted=0",
+                (route_id,),
+            )
+        return self.get_route(route_id)
+
+    def count_active_routes(self, wall=None):
+        """How many currently-active routes a /reset would affect."""
+        sql = "SELECT COUNT(*) c FROM routes WHERE deleted=0 AND retired_at IS NULL"
+        params = []
+        if wall:
+            sql += " AND wall=?"
+            params.append(wall)
+        with self._lock, self._connect() as conn:
+            return conn.execute(sql, params).fetchone()["c"]
+
+    def retire_wall(self, wall=None):
+        """Bulk-retire every currently-active route, optionally scoped to
+        one wall (wall=None retires the whole gym). Mirrors a physical wall
+        reset, where every route on a stripped section comes down at once.
+        Returns the number of routes retired.
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        sql = ("UPDATE routes SET retired_at=?, updated_at=? "
+               "WHERE deleted=0 AND retired_at IS NULL")
+        params = [now, now]
+        if wall:
+            sql += " AND wall=?"
+            params.append(wall)
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(sql, params)
+            return cur.rowcount
+
+    def list_routes(self, grade=None, wall=None, status="active"):
+        """Return routes, newest-graded first, optionally filtered.
+
+        status: "active" (default -- currently on the wall), "retired"
+        (removed in a reset but kept for history), or "all" (both, still
+        excluding admin-deleted rows).
+        """
         sql = "SELECT * FROM routes WHERE deleted=0"
         params = []
+        if status == "active":
+            sql += " AND retired_at IS NULL"
+        elif status == "retired":
+            sql += " AND retired_at IS NOT NULL"
+        elif status != "all":
+            raise ValueError(f"unknown status {status!r}")
         if grade:
             low = _V_IDX.get(_norm_grade(grade))
             if low is not None:
@@ -480,10 +546,14 @@ class Storage:
 
     def stats(self):
         with self._lock, self._connect() as conn:
-            total = conn.execute(
-                "SELECT COUNT(*) c FROM routes WHERE deleted=0"
-            ).fetchone()["c"]
-        return {"total": total}
+            row = conn.execute(
+                "SELECT COUNT(*) total, "
+                "SUM(CASE WHEN retired_at IS NULL THEN 1 ELSE 0 END) active "
+                "FROM routes WHERE deleted=0"
+            ).fetchone()
+        total = row["total"] or 0
+        active = row["active"] or 0
+        return {"total": total, "active": active, "retired": total - active}
 
 
 if __name__ == "__main__":

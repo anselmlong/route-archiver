@@ -116,13 +116,17 @@ def index():
 
 @app.get("/api/routes")
 def routes(request: Request, grade: str | None = None, wall: str | None = None,
-           tg: str | None = None):  # tg: optional initData query param
+           tg: str | None = None,  # tg: optional initData query param
+           status: Literal["active", "retired", "all"] = "active"):
     """Return routes optionally filtered by minimum grade or exact wall.
 
+    `status` picks "on the wall now" (active, default), routes stripped in
+    a past reset (retired), or both (all) -- retired routes stay tickable
+    since a climber's send history shouldn't vanish when a route comes down.
     Ratings/ticks are attached; my_rating / my_tick are personalised when a
     valid Telegram initData is supplied (as `tg` query param or header).
     """
-    rows = storage.list_routes(grade=grade, wall=wall)
+    rows = storage.list_routes(grade=grade, wall=wall, status=status)
     viewer = None
     raw = tg or request.headers.get("X-Telegram-Init-Data", "")
     if raw:
@@ -177,10 +181,13 @@ async def tick_grade(route_id: int, body: TickGradeBody, request: Request):
 
 @app.get("/api/meta")
 def meta():
+    stats = storage.stats()
     return {
         "grades": V_ORDER,
         "walls": storage.walls(),
-        "count": storage.stats()["total"],
+        "count": stats["total"],
+        "active_count": stats["active"],
+        "retired_count": stats["retired"],
     }
 
 

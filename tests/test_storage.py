@@ -174,3 +174,99 @@ def test_set_tick_grade_updates_existing_tick(storage):
     rows = storage.list_routes()
     storage.attach_ratings_and_ticks(rows, tg_user_id=1)
     assert rows[0]["my_suggested_grade"] == "V6"
+
+
+# --------------------------------------------------------------------------- #
+# Storage: route lifecycle (retire / unretire / wall resets)
+# --------------------------------------------------------------------------- #
+def test_new_route_is_active_by_default(storage):
+    r = storage.add_route(name="X", grade="V1", grade_low=1)
+    assert r["retired_at"] is None
+    assert r["id"] in [x["id"] for x in storage.list_routes(status="active")]
+
+
+def test_retire_route_then_unretire(storage):
+    r = storage.add_route(name="X", grade="V1", grade_low=1)
+    retired = storage.retire_route(r["id"])
+    assert retired["retired_at"] is not None
+    assert r["id"] not in [x["id"] for x in storage.list_routes(status="active")]
+    assert r["id"] in [x["id"] for x in storage.list_routes(status="retired")]
+
+    active_again = storage.unretire_route(r["id"])
+    assert active_again["retired_at"] is None
+    assert r["id"] in [x["id"] for x in storage.list_routes(status="active")]
+
+
+def test_retire_route_ignores_deleted_routes(storage):
+    r = storage.add_route(name="X", grade="V1", grade_low=1)
+    storage.delete_route(r["id"])
+    storage.retire_route(r["id"])
+    # get_route already excludes deleted rows regardless of retired_at
+    assert storage.get_route(r["id"]) is None
+
+
+def test_get_route_still_returns_retired_routes(storage):
+    """Retired routes stay fully accessible -- rating/ticking history on
+    them must keep working after a reset."""
+    r = storage.add_route(name="X", grade="V1", grade_low=1)
+    storage.retire_route(r["id"])
+    assert storage.get_route(r["id"]) is not None
+
+
+def test_list_routes_status_all_includes_active_and_retired_not_deleted(storage):
+    active = storage.add_route(name="Active", grade="V1", grade_low=1)
+    retired = storage.add_route(name="Retired", grade="V1", grade_low=1)
+    deleted = storage.add_route(name="Deleted", grade="V1", grade_low=1)
+    storage.retire_route(retired["id"])
+    storage.delete_route(deleted["id"])
+    ids = {x["id"] for x in storage.list_routes(status="all")}
+    assert ids == {active["id"], retired["id"]}
+
+
+def test_list_routes_rejects_unknown_status(storage):
+    with pytest.raises(ValueError):
+        storage.list_routes(status="bogus")
+
+
+def test_count_active_routes_scoped_by_wall(storage):
+    storage.add_route(name="L1", grade="V1", grade_low=1, wall="Left")
+    storage.add_route(name="L2", grade="V1", grade_low=1, wall="Left")
+    storage.add_route(name="R1", grade="V1", grade_low=1, wall="Right")
+    assert storage.count_active_routes() == 3
+    assert storage.count_active_routes("Left") == 2
+    assert storage.count_active_routes("Right") == 1
+    assert storage.count_active_routes("Middle") == 0
+
+
+def test_retire_wall_scoped_only_retires_matching_active_routes(storage):
+    left = storage.add_route(name="L", grade="V1", grade_low=1, wall="Left")
+    right = storage.add_route(name="R", grade="V1", grade_low=1, wall="Right")
+    n = storage.retire_wall("Left")
+    assert n == 1
+    assert storage.get_route(left["id"])["retired_at"] is not None
+    assert storage.get_route(right["id"])["retired_at"] is None
+
+
+def test_retire_wall_none_retires_everything_active(storage):
+    storage.add_route(name="L", grade="V1", grade_low=1, wall="Left")
+    storage.add_route(name="R", grade="V1", grade_low=1, wall="Right")
+    storage.add_route(name="No wall", grade="V1", grade_low=1)
+    n = storage.retire_wall(None)
+    assert n == 3
+    assert storage.count_active_routes() == 0
+
+
+def test_retire_wall_does_not_re_timestamp_already_retired_routes(storage):
+    r = storage.add_route(name="L", grade="V1", grade_low=1, wall="Left")
+    storage.retire_route(r["id"])
+    first_retired_at = storage.get_route(r["id"])["retired_at"]
+    n = storage.retire_wall("Left")
+    assert n == 0
+    assert storage.get_route(r["id"])["retired_at"] == first_retired_at
+
+
+def test_stats_reports_active_and_retired_breakdown(storage):
+    a = storage.add_route(name="A", grade="V1", grade_low=1)
+    storage.add_route(name="B", grade="V1", grade_low=1)
+    storage.retire_route(a["id"])
+    assert storage.stats() == {"total": 2, "active": 1, "retired": 1}
