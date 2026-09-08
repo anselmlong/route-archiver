@@ -51,6 +51,11 @@ they just keep posting route pics.
 - **Search** — `/search <name or setter>` (bot), or the search box in the
   mini-app's Browse tab: case-insensitive match against route name or
   setter name.
+- **Comment threads** — climbers can leave beta/tips on a route from the
+  mini-app's detail sheet (mini-app only; posting a longer comment doesn't
+  fit a bot command well). Flat, chronological, 500 chars max. Anyone can
+  read; only the author can delete their own comment -- moderating
+  someone else's is an admin/bot-side action, not exposed here.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |

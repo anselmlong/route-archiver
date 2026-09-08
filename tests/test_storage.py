@@ -555,3 +555,73 @@ def test_list_routes_search_combines_with_status_and_wall(storage):
     assert [r["name"] for r in active_matches] == ["Crack Line"]
     all_matches = storage.list_routes(search="crack", status="all")
     assert {r["name"] for r in all_matches} == {"Crack Line", "Crack Attack"}
+
+
+# --------------------------------------------------------------------------- #
+# Storage: comment threads
+# --------------------------------------------------------------------------- #
+def test_add_comment_and_list_oldest_first(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="first")
+    storage.add_comment(r["id"], tg_user_id=2, tg_user_name="Cat", text="second")
+    texts = [c["text"] for c in storage.list_comments(r["id"])]
+    assert texts == ["first", "second"]
+
+
+def test_add_comment_strips_whitespace(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    c = storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="  crimpy  ")
+    assert c["text"] == "crimpy"
+
+
+def test_add_comment_rejects_empty_or_whitespace_only(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    with pytest.raises(ValueError):
+        storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="")
+    with pytest.raises(ValueError):
+        storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="   ")
+
+
+def test_add_comment_rejects_over_500_chars(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    with pytest.raises(ValueError):
+        storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="x" * 501)
+
+
+def test_delete_own_comment_removes_it(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    c = storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="beta")
+    assert storage.delete_own_comment(c["id"], tg_user_id=1) is True
+    assert storage.list_comments(r["id"]) == []
+
+
+def test_delete_comment_by_non_author_fails(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    c = storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="beta")
+    assert storage.delete_own_comment(c["id"], tg_user_id=999) is False
+    assert len(storage.list_comments(r["id"])) == 1
+
+
+def test_delete_comment_twice_second_call_fails(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    c = storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="beta")
+    assert storage.delete_own_comment(c["id"], tg_user_id=1) is True
+    assert storage.delete_own_comment(c["id"], tg_user_id=1) is False
+
+
+def test_comment_count_attached_via_attach_ratings_and_ticks(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="one")
+    storage.add_comment(r["id"], tg_user_id=2, tg_user_name="Cat", text="two")
+    rows = storage.list_routes()
+    storage.attach_ratings_and_ticks(rows)
+    assert rows[0]["comment_count"] == 2
+
+
+def test_comment_count_excludes_deleted(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    c = storage.add_comment(r["id"], tg_user_id=1, tg_user_name="Bob", text="one")
+    storage.delete_own_comment(c["id"], tg_user_id=1)
+    rows = storage.list_routes()
+    storage.attach_ratings_and_ticks(rows)
+    assert rows[0]["comment_count"] == 0

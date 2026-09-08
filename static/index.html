@@ -113,6 +113,19 @@
   .tickmeta{color:var(--muted);font-size:12.5px}
   .tickgrade{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:13px;width:72px;text-transform:uppercase}
   .tickgrade.hidden{display:none}
+
+  /* comments */
+  .comments{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  .clist{display:flex;flex-direction:column;gap:9px;margin:9px 0}
+  .crow{font-size:13px;line-height:1.45}
+  .crow .cwho{color:var(--text);font-weight:600}
+  .crow .cwhen{color:var(--muted);font-size:11px;margin-left:5px}
+  .crow .cdel{color:var(--muted);background:none;border:0;cursor:pointer;font-size:11px;text-decoration:underline;margin-left:6px;padding:0}
+  .cempty{color:var(--muted);font-size:12.5px}
+  .cnew{display:flex;gap:8px;margin-top:6px}
+  .cinput{flex:1;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px}
+  .cpost{background:var(--accent);color:#151008;border:0;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0}
+  .commentcount{color:var(--muted);font-size:11px}
 </style>
 </head>
 <body>
@@ -183,6 +196,15 @@
         <button class="tickbtn" id="stck">✓ Tick sent</button>
         <input class="tickgrade hidden" id="stckgrade" placeholder="V?" maxlength="6" inputmode="text">
         <span class="tickmeta" id="sascent"></span>
+      </div>
+
+      <div class="comments" id="scomments">
+        <span class="lab">Comments</span>
+        <div class="clist" id="clist"></div>
+        <div class="cnew">
+          <input id="cinput" class="cinput" placeholder="Add beta or a tip…" maxlength="500">
+          <button class="cpost" id="cpost">Post</button>
+        </div>
       </div>
 
       <div class="foot" id="sfoot"></div>
@@ -297,6 +319,7 @@ function renderGrid(list){
           ${stars(r.avg_rating)}<span class="starcount">${r.rating_count||""}</span>
           ${(r.tick_count||0)>0?`<span class="tickcount">✓ ${r.tick_count}</span>`:""}
           ${r.recent_ticks?`<span class="hotcount">🔥 ${r.recent_ticks}</span>`:""}
+          ${(r.comment_count||0)>0?`<span class="commentcount">💬 ${r.comment_count}</span>`:""}
         </div>
       </div>
     </div>`).join("");
@@ -572,8 +595,83 @@ function open(r){
   state.cur=r;
   $("#simg").src=`/api/photo/${r.id}`;
   refreshSheet();
+  $("#cinput").value="";
+  loadComments(r.id);
   $("#scrim").classList.add("open");
   $("#sheet").classList.add("open");
+}
+
+/* ---- comments ---- */
+async function loadComments(routeId){
+  const list=$("#clist");
+  list.innerHTML='<div class="cempty">loading…</div>';
+  try{
+    let q="/api/comments/"+routeId;
+    if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
+    const d=await fetch(q).then(x=>x.json());
+    if(state.cur&&state.cur.id===routeId)renderComments(routeId,d.comments);
+  }catch(e){
+    if(state.cur&&state.cur.id===routeId)list.innerHTML='<div class="cempty">Couldn\'t load comments.</div>';
+  }
+}
+
+function renderComments(routeId,comments){
+  const list=$("#clist");
+  if(!comments.length){
+    list.innerHTML='<div class="cempty">No comments yet — add some beta.</div>';
+    return;
+  }
+  list.innerHTML="";
+  comments.forEach(c=>{
+    const row=document.createElement("div");
+    row.className="crow";
+    const who=document.createElement("span");
+    who.className="cwho";
+    who.textContent=(c.tg_user_name||"climber")+": ";
+    row.appendChild(who);
+    row.appendChild(document.createTextNode(c.text));
+    const when=document.createElement("span");
+    when.className="cwhen";
+    when.textContent=fmtDate(c.created_at);
+    row.appendChild(when);
+    if(c.is_mine){
+      const del=document.createElement("button");
+      del.className="cdel";
+      del.textContent="delete";
+      del.onclick=()=>deleteComment(c.id,routeId);
+      row.appendChild(del);
+    }
+    list.appendChild(row);
+  });
+}
+
+function bumpCommentCount(routeId,delta){
+  findRoutes(routeId).forEach(r=>{r.comment_count=Math.max(0,(r.comment_count||0)+delta)});
+  renderGrid(state.curList);
+}
+
+async function postComment(routeId){
+  const input=$("#cinput");
+  const text=input.value.trim();
+  if(!text)return;
+  if(!state.initData){alert("Open via Telegram to comment.");return}
+  try{
+    const res=await fetch(`/api/comments/${routeId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,init_data:state.initData})});
+    const d=await res.json();
+    if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
+    if(!res.ok){alert(d.error||"Couldn't post that comment.");return}
+    input.value="";
+    bumpCommentCount(routeId,1);
+    loadComments(routeId);
+  }catch(e){alert("Couldn't post your comment. Check your connection and try again.")}
+}
+
+async function deleteComment(commentId,routeId){
+  try{
+    await fetch(`/api/comments/${commentId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
+    bumpCommentCount(routeId,-1);
+    loadComments(routeId);
+  }catch(e){alert("Couldn't delete your comment. Check your connection and try again.")}
 }
 function closeSheet(){
   $("#scrim").classList.remove("open");
@@ -615,6 +713,8 @@ $("#starselect").onclick=e=>{
 $("#stck").onclick=()=>state.cur&&tick(state.cur.id,1);
 $("#stckgrade").onchange=()=>state.cur&&setTickGrade(state.cur.id);
 $("#stckgrade").onkeyup=e=>{if(e.key==="Enter"){state.cur&&setTickGrade(state.cur.id);e.target.blur()}};
+$("#cpost").onclick=()=>state.cur&&postComment(state.cur.id);
+$("#cinput").onkeyup=e=>{if(e.key==="Enter"){state.cur&&postComment(state.cur.id);e.target.blur()}};
 
 load();
 </script>

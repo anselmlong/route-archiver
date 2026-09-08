@@ -469,6 +469,101 @@ def test_setter_personalizes_when_tg_param_given(client, api_module):
 
 
 # --------------------------------------------------------------------------- #
+# /api/comments
+# --------------------------------------------------------------------------- #
+def test_comments_404_for_missing_route(client, api_module):
+    r = client.get("/api/comments/999")
+    assert r.status_code == 404
+
+
+def test_comments_empty_list_for_route_with_none(client, api_module):
+    route = _seed_route(api_module)
+    r = client.get(f"/api/comments/{route['id']}")
+    assert r.status_code == 200
+    assert r.json() == {"comments": []}
+
+
+def test_post_comment_requires_auth(client, api_module):
+    route = _seed_route(api_module)
+    r = client.post(f"/api/comments/{route['id']}", json={"text": "beta"})
+    assert r.status_code == 401
+
+
+def test_post_comment_requires_nonempty_text_422(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    r = client.post(f"/api/comments/{route['id']}", json={"text": "", "init_data": raw})
+    assert r.status_code == 422
+
+
+def test_post_comment_requires_text_under_500_chars_422(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    r = client.post(f"/api/comments/{route['id']}",
+                     json={"text": "x" * 501, "init_data": raw})
+    assert r.status_code == 422
+
+
+def test_post_comment_404_for_missing_route(client, api_module):
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    r = client.post("/api/comments/999", json={"text": "beta", "init_data": raw})
+    assert r.status_code == 404
+
+
+def test_post_then_list_comment_hides_tg_user_id_and_marks_is_mine(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1, first_name="Bob")
+    posted = client.post(f"/api/comments/{route['id']}",
+                          json={"text": "watch the sloper", "init_data": raw}).json()
+    assert posted["text"] == "watch the sloper"
+    assert posted["tg_user_name"] == "Bob"
+    assert posted["is_mine"] is True
+    assert "tg_user_id" not in posted
+
+    anon_view = client.get(f"/api/comments/{route['id']}").json()["comments"][0]
+    assert anon_view["is_mine"] is False
+    assert "tg_user_id" not in anon_view
+
+    mine_view = client.get(f"/api/comments/{route['id']}", params={"tg": raw}).json()["comments"][0]
+    assert mine_view["is_mine"] is True
+
+
+def test_delete_comment_requires_auth(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    posted = client.post(f"/api/comments/{route['id']}", json={"text": "beta", "init_data": raw}).json()
+    r = client.request("DELETE", f"/api/comments/{posted['id']}", json={})
+    assert r.status_code == 401
+
+
+def test_delete_own_comment_removes_it(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    posted = client.post(f"/api/comments/{route['id']}", json={"text": "beta", "init_data": raw}).json()
+    r = client.request("DELETE", f"/api/comments/{posted['id']}", json={"init_data": raw})
+    assert r.status_code == 200
+    assert client.get(f"/api/comments/{route['id']}").json()["comments"] == []
+
+
+def test_delete_someone_elses_comment_404s(client, api_module):
+    route = _seed_route(api_module)
+    author = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    other = sign_init_data(TEST_BOT_TOKEN, user_id=2)
+    posted = client.post(f"/api/comments/{route['id']}", json={"text": "beta", "init_data": author}).json()
+    r = client.request("DELETE", f"/api/comments/{posted['id']}", json={"init_data": other})
+    assert r.status_code == 404
+    assert len(client.get(f"/api/comments/{route['id']}").json()["comments"]) == 1
+
+
+def test_routes_includes_comment_count(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
+    client.post(f"/api/comments/{route['id']}", json={"text": "beta", "init_data": raw})
+    row = client.get("/api/routes").json()["routes"][0]
+    assert row["comment_count"] == 1
+
+
+# --------------------------------------------------------------------------- #
 # misc
 # --------------------------------------------------------------------------- #
 def test_healthz(client):

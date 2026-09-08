@@ -16,7 +16,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from storage import V_ORDER, Storage
 
@@ -106,6 +106,15 @@ class TickGradeBody(BaseModel):
     init_data: str | None = None
 
 
+class CommentBody(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    init_data: str | None = None
+
+
+class DeleteCommentBody(BaseModel):
+    init_data: str | None = None
+
+
 # --------------------------------------------------------------------------- #
 # routes
 # --------------------------------------------------------------------------- #
@@ -177,6 +186,58 @@ async def tick_grade(route_id: int, body: TickGradeBody, request: Request):
         return JSONResponse(status_code=404, content={"error": "route not found"})
     storage.set_tick_grade(route_id, uid, body.suggested_grade)
     return {"ticked": True, "suggested_grade": body.suggested_grade}
+
+
+@app.get("/api/comments/{route_id}")
+def comments(route_id: int, request: Request, tg: str | None = None):
+    """A route's comment thread, oldest first. Public to read (like the
+    route's own description); `is_mine` is personalised the same way
+    my_rating/my_tick are, when a valid initData is supplied."""
+    if not storage.get_route(route_id):
+        return JSONResponse(status_code=404, content={"error": "route not found"})
+    viewer = None
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    if raw:
+        try:
+            viewer, _ = validate_init_data(raw)
+        except ValueError:
+            viewer = None
+    rows = storage.list_comments(route_id)
+    for r in rows:
+        r["is_mine"] = viewer is not None and r["tg_user_id"] == viewer
+        r.pop("tg_user_id", None)
+    return {"comments": rows}
+
+
+@app.post("/api/comments/{route_id}")
+async def add_comment(route_id: int, body: CommentBody, request: Request):
+    """Post a beta/tip comment on a route."""
+    try:
+        uid, name = _identity(body, request)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+    if not storage.get_route(route_id):
+        return JSONResponse(status_code=404, content={"error": "route not found"})
+    try:
+        comment = storage.add_comment(route_id, uid, name, body.text)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    comment["is_mine"] = True
+    comment.pop("tg_user_id", None)
+    return comment
+
+
+@app.delete("/api/comments/{comment_id}")
+async def delete_comment(comment_id: int, body: DeleteCommentBody, request: Request):
+    """Delete your own comment. Moderating someone else's is an
+    admin/bot-side action, not exposed here."""
+    try:
+        uid, _ = _identity(body, request)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+    if not storage.delete_own_comment(comment_id, uid):
+        return JSONResponse(status_code=404, content={"error": "comment not found"})
+    return {"deleted": True}
 
 
 @app.get("/api/meta")

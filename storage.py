@@ -296,6 +296,21 @@ class Storage:
                 # suggestion doesn't parse as a V-grade.
                 conn.execute("ALTER TABLE ticks ADD COLUMN suggested_grade_low INTEGER")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_route ON ticks(route_id)")
+            # beta/tip comment threads: flat, one route -> many comments
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS comments (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    route_id     INTEGER NOT NULL REFERENCES routes(id),
+                    tg_user_id   INTEGER NOT NULL,
+                    tg_user_name TEXT,
+                    text         TEXT NOT NULL,
+                    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                    deleted      INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_comments_route ON comments(route_id)")
             # legacy up/down votes table is gone; drop any stale one from an old deploy
             conn.execute("DROP TABLE IF EXISTS votes")
 
@@ -532,6 +547,57 @@ class Storage:
             ).fetchone()
         return row["c"]
 
+    # ---- beta/tip comment threads -----------------------------------------
+    def add_comment(self, route_id, tg_user_id, tg_user_name, text):
+        """Post a comment on a route. Raises ValueError for empty or
+        over-length text (comments are meant to be a quick beta note, not
+        an essay)."""
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("empty comment")
+        if len(text) > 500:
+            raise ValueError("comment too long (max 500 chars)")
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO comments (route_id, tg_user_id, tg_user_name, text) "
+                "VALUES (?,?,?,?)",
+                (route_id, tg_user_id, tg_user_name, text),
+            )
+            row = conn.execute(
+                "SELECT * FROM comments WHERE id=?", (cur.lastrowid,)
+            ).fetchone()
+        return dict(row)
+
+    def list_comments(self, route_id):
+        """A route's comments, oldest first (chronological conversation),
+        excluding soft-deleted ones."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM comments WHERE route_id=? AND deleted=0 "
+                "ORDER BY created_at ASC, id ASC",
+                (route_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_own_comment(self, comment_id, tg_user_id):
+        """Soft-delete a comment, but only if tg_user_id is its author.
+        Returns True if a comment was actually deleted. Moderating
+        someone else's comment is an admin/bot-side concern, not exposed
+        here."""
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE comments SET deleted=1 WHERE id=? AND tg_user_id=? AND deleted=0",
+                (comment_id, tg_user_id),
+            )
+            return cur.rowcount > 0
+
+    def _comment_count(self, route_id):
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) c FROM comments WHERE route_id=? AND deleted=0", (route_id,)
+            ).fetchone()
+        return row["c"]
+
     # ---- personal logbook + leaderboards ---------------------------------
     def user_ticked_routes(self, tg_user_id):
         """A climber's own send history, newest tick first. Includes
@@ -667,6 +733,11 @@ class Storage:
                 f"WHERE route_id IN ({marks}) GROUP BY route_id",
                 ids,
             ).fetchall()
+            comment_rows = conn.execute(
+                f"SELECT route_id, COUNT(*) c FROM comments "
+                f"WHERE route_id IN ({marks}) AND deleted=0 GROUP BY route_id",
+                ids,
+            ).fetchall()
             consensus_rows = conn.execute(
                 f"SELECT route_id, suggested_grade_low FROM ticks "
                 f"WHERE route_id IN ({marks}) AND suggested_grade_low IS NOT NULL "
@@ -693,18 +764,21 @@ class Storage:
         by_id = {r["id"]: r for r in routes}
         agg_r = {r["route_id"]: r for r in rating_rows}
         agg_t = {r["route_id"]: r for r in tick_rows}
+        agg_c = {r["route_id"]: r for r in comment_rows}
         consensus_values = {}
         for row in consensus_rows:
             consensus_values.setdefault(row["route_id"], []).append(row["suggested_grade_low"])
         for rid, r in by_id.items():
             ar = agg_r.get(rid)
             at = agg_t.get(rid)
+            ac = agg_c.get(rid)
             r["avg_rating"] = round((ar["av"] or 0) * 2) / 2 if ar and ar["c"] else None
             r["rating_count"] = ar["c"] if ar else 0
             r["my_rating"] = mine_r.get(rid)
             r["tick_count"] = at["c"] if at else 0
             r["my_tick"] = 1 if rid in mine_t else 0
             r["my_suggested_grade"] = mine_tg.get(rid)
+            r["comment_count"] = ac["c"] if ac else 0
             r["consensus_grade"], r["consensus_count"] = self._consensus_from_values(
                 consensus_values.get(rid, [])
             )

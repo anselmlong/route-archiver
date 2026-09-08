@@ -571,3 +571,94 @@ def test_setter_profile_back_button_returns_to_browse(setter_live_server):
         # default active-only browse view: Sam's retired route drops out
         pg.wait_for_function("document.querySelectorAll('.card').length === 1")
         browser.close()
+
+
+# --------------------------------------------------------------------------- #
+# Comment threads
+# --------------------------------------------------------------------------- #
+def test_comment_thread_empty_state(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.wait_for_selector("#clist .cempty")
+    assert "No comments yet" in page.locator("#clist").inner_text()
+
+
+def test_posting_comment_without_telegram_prompts_alert_not_a_request(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.wait_for_selector("#clist .cempty")
+
+    dialog_messages = []
+    page.on("dialog", lambda d: (dialog_messages.append(d.message), d.accept()))
+    got_request = {"hit": False}
+    page.route("**/api/comments/**", lambda route: (got_request.__setitem__("hit", True), route.continue_()))
+
+    page.fill("#cinput", "some beta")
+    page.locator("#cpost").click()
+    page.wait_for_timeout(150)
+
+    assert dialog_messages, "expected an alert() prompting to open via Telegram"
+    assert not got_request["hit"], "comment must not be posted without a verified Telegram session"
+    assert "No comments yet" in page.locator("#clist").inner_text()
+
+
+def test_posting_and_deleting_own_comment(authed_page):
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.wait_for_selector("#clist .cempty")
+
+    authed_page.fill("#cinput", "watch the crimpy start")
+    authed_page.locator("#cpost").click()
+    authed_page.wait_for_selector(".crow")
+    text = authed_page.locator(".crow").inner_text()
+    assert "watch the crimpy start" in text
+    assert "Tester" in text  # tg_user_name from the signed initData
+    assert authed_page.locator("#cinput").input_value() == ""
+
+    # the card behind the sheet reflects the new comment count
+    authed_page.eval_on_selector("#scrim", "el => el.click()")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+    badge = authed_page.locator(".card", has_text="Crack Line").locator(".commentcount")
+    assert "💬 1" in badge.inner_text()
+
+    # delete it -- back to the empty state, count badge gone
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator(".cdel").click()
+    authed_page.wait_for_selector("#clist .cempty")
+    assert "No comments yet" in authed_page.locator("#clist").inner_text()
+    authed_page.eval_on_selector("#scrim", "el => el.click()")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert authed_page.locator(".card", has_text="Crack Line").locator(".commentcount").count() == 0
+
+
+def test_comment_from_another_user_has_no_delete_button(live_server, authed_page):
+    # seed a comment from a different Telegram user directly via storage
+    live_server["storage"].add_comment(
+        live_server["route1"]["id"], tg_user_id=999, tg_user_name="Other Climber", text="beta from someone else"
+    )
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.wait_for_selector(".crow")
+    row = authed_page.locator(".crow").first
+    assert "Other Climber" in row.inner_text()
+    assert row.locator(".cdel").count() == 0
+
+
+def test_comment_rejected_when_over_500_chars_shows_alert(authed_page):
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.wait_for_selector("#clist .cempty")
+
+    dialog_messages = []
+    authed_page.on("dialog", lambda d: (dialog_messages.append(d.message), d.accept()))
+    # the <input maxlength=500> already blocks this in a real browser UI,
+    # but exercise the server-side 422 path directly to make sure it's
+    # actually enforced, not just a client-side nicety
+    authed_page.eval_on_selector(
+        "#cinput", "(el, v) => { el.value = v; el.removeAttribute('maxlength'); }", "x" * 501
+    )
+    authed_page.locator("#cpost").click()
+    authed_page.wait_for_timeout(150)
+    assert dialog_messages
+    assert "No comments yet" in authed_page.locator("#clist").inner_text()
