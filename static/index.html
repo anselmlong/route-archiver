@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NUS USC Routes</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1f232c; --border:#2a2f3a;
+    --text:#e8eaf0; --muted:#9aa2b0; --accent:#f59e0b; --accent2:#38bdf8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:40px}
+  header{position:sticky;top:0;z-index:10;background:linear-gradient(180deg,var(--bg) 80%,transparent);padding:16px 16px 8px}
+  h1{font-size:1.3rem;letter-spacing:-.02em}
+  h1 span{color:var(--accent2)}
+  .sub{color:var(--muted);font-size:.85rem;margin-top:2px}
+  .sortrow{display:flex;gap:8px;padding:6px 16px}
+  .sortrow select{background:var(--panel);color:var(--text);border:1px solid var(--border);
+    border-radius:10px;padding:10px 12px;font-size:.95rem;flex:1;-webkit-appearance:none;appearance:none}
+  .chips{display:flex;gap:6px;overflow-x:auto;padding:6px 16px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{flex:0 0 auto;background:var(--panel2);color:var(--muted);border:1px solid var(--border);
+    border-radius:999px;padding:6px 14px;font-size:.82rem;cursor:pointer;white-space:nowrap}
+  .chip.on{background:var(--accent);color:#131415;border-color:var(--accent);font-weight:600}
+  .wallrow{display:flex;gap:8px;padding:6px 16px}
+  .wallrow select{background:var(--panel);color:var(--text);border:1px solid var(--border);
+    border-radius:10px;padding:10px 12px;font-size:.95rem;flex:1;-webkit-appearance:none;appearance:none}
+  main{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:12px 16px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;
+    display:flex;flex-direction:column;box-shadow:0 2px 6px rgba(0,0,0,.25);cursor:pointer;transition:transform .08s}
+  .card:active{transform:scale(.98)}
+  .card img{width:100%;aspect-ratio:3/4;object-fit:cover;background:var(--panel2);display:block}
+  .card .meta{padding:10px;display:flex;flex-direction:column;gap:3px}
+  .card .name{font-weight:600;font-size:.92rem;line-height:1.2}
+  .card .grade{color:var(--accent);font-weight:700;font-size:.9rem}
+  .card .wall{color:var(--muted);font-size:.78rem}
+  .empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:40px 0}
+  .count{color:var(--muted);font-size:.8rem;padding:2px 16px 0}
+  .topbar{display:flex;justify-content:space-between;align-items:center}
+
+  /* detail modal */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(2px);
+    z-index:20;display:none;align-items:flex-end;justify-content:center}
+  .overlay.open{display:flex}
+  .sheet{background:var(--panel);width:100%;max-width:560px;border-radius:20px 20px 0 0;
+    max-height:92vh;overflow-y:auto;animation:up .18s ease}
+  @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
+  .sheet img{width:100%;max-height:62vh;object-fit:cover;display:block;background:var(--panel2)}
+  .sheet .body{padding:16px}
+  .sheet h2{font-size:1.25rem;letter-spacing:-.01em}
+  .sheet .badges{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
+  .badge{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+    padding:5px 10px;font-size:.85rem;display:flex;align-items:center;gap:5px}
+  .badge.grade{color:#131415;background:var(--accent);border-color:var(--accent);font-weight:700}
+  .sheet .setter{color:var(--muted);font-size:.88rem;margin-top:8px}
+  .sheet .date{color:var(--muted);font-size:.78rem;margin-top:4px}
+  .close{position:sticky;top:0;float:right;margin:10px 10px -40px 0;z-index:1;
+    background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:999px;
+    width:34px;height:34px;font-size:1rem;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <h1>🧗 NUS USC <span>Routes</span></h1>
+    <div class="count" id="count"></div>
+  </div>
+  <div class="sub">Tap a grade to filter · tap a route for details</div>
+</header>
+
+<div class="sortrow">
+  <select id="sort">
+    <option value="grade">Sorted: hardest first</option>
+    <option value="new">Sorted: newest first</option>
+  </select>
+</div>
+<div class="chips" id="chips"></div>
+<div class="wallrow">
+  <select id="wall"><option value="">All walls</option></select>
+</div>
+
+<main id="grid"></main>
+
+<div class="overlay" id="overlay">
+  <div class="sheet">
+    <button class="close" id="close">✕</button>
+    <img id="dimg" alt="">
+    <div class="body">
+      <h2 id="dname"></h2>
+      <div class="badges">
+        <span class="badge grade" id="dgrade"></span>
+        <span class="badge" id="dwall"></span>
+      </div>
+      <div class="setter" id="dsetter"></div>
+      <div class="date" id="ddate"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const state = {routes:[], grade:"", wall:"", sort:"grade", gradeIdx:{}};
+
+async function load(){
+  const [r,k] = await Promise.all([
+    fetch('/api/routes').then(r=>r.json()),
+    fetch('/api/meta').then(r=>r.json())
+  ]);
+  state.routes = r.routes;
+  k.grades.forEach((g,i)=>state.gradeIdx[g]=i);
+  renderMeta(k);
+  render();
+}
+
+function renderMeta(k){
+  const chipWrap = document.getElementById('chips');
+  chipWrap.innerHTML = '';
+  const allChip = document.createElement('span');
+  allChip.className = 'chip' + (state.grade==='' ? ' on':'');
+  allChip.textContent = 'All';
+  allChip.onclick = ()=>{state.grade='';renderMeta(k);render()};
+  chipWrap.appendChild(allChip);
+  k.grades.forEach(g=>{
+    const c = document.createElement('span');
+    c.className = 'chip' + (state.grade===g ? ' on':'');
+    c.textContent = g;
+    c.onclick = ()=>{state.grade = (state.grade===g)?'':g; renderMeta(k); render()};
+    chipWrap.appendChild(c);
+  });
+  const wallSel = document.getElementById('wall');
+  wallSel.innerHTML = '<option value="">All walls</option>' +
+    k.walls.map(w=>`<option value="${esc(w)}"${state.wall===w?' selected':''}>${esc(w)}</option>`).join('');
+}
+
+function esc(s){return String(s ?? '').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function fmtDate(d){try{const dt=new Date(d.replace(' ','T')+'Z');return dt.toLocaleDateString(undefined,{day:'numeric',month:'short'})}catch(e){return d}}
+
+function render(){
+  const grid = document.getElementById('grid');
+  let list = state.routes;
+  if(state.wall) list = list.filter(r=>r.wall===state.wall);
+  if(state.grade){
+    const idx = state.gradeIdx[state.grade];
+    if(idx>=0) list = list.filter(r=>r.grade_low >= idx);
+  }
+  if(state.sort==='new') list = [...list].sort((a,b)=> b.created_at.localeCompare(a.created_at));
+  else list = [...list].sort((a,b)=> b.grade_low-a.grade_low || b.created_at.localeCompare(a.created_at));
+
+  document.getElementById('count').textContent = list.length + ' routes';
+  document.getElementById('wall').value = state.wall ?? '';
+  if(!list.length){grid.innerHTML='<div class="empty">No routes here yet.</div>';return}
+  grid.innerHTML = list.map(r=>`
+    <div class="card" data-id="${r.id}">
+      <img loading="lazy" src="/api/photo/${r.id}" alt="${esc(r.name)}">
+      <div class="meta">
+        <div class="name">${esc(r.name)}</div>
+        <div class="grade">${esc(r.grade)}</div>
+        ${r.wall?`<div class="wall">${esc(r.wall)}</div>`:''}
+      </div>
+    </div>`).join('');
+  grid.querySelectorAll('.card').forEach(card=>{
+    card.onclick = ()=>{
+      const id = Number(card.dataset.id);
+      const r = state.routes.find(x=>x.id===id);
+      if(r) openDetail(r);
+    };
+  });
+}
+
+function openDetail(r){
+  document.getElementById('dimg').src = `/api/photo/${r.id}`;
+  document.getElementById('dimg').alt = r.name;
+  document.getElementById('dname').textContent = r.name;
+  document.getElementById('dgrade').textContent = r.grade;
+  const wallEl = document.getElementById('dwall');
+  if(r.wall){wallEl.style.display='flex'; wallEl.textContent='🧱 '+r.wall}
+  else wallEl.style.display='none';
+  document.getElementById('dsetter').textContent = r.setter_name ? 'Set by '+r.setter_name : '';
+  document.getElementById('ddate').textContent = 'Added '+fmtDate(r.created_at);
+  document.getElementById('overlay').classList.add('open');
+}
+
+document.getElementById('close').onclick = ()=>document.getElementById('overlay').classList.remove('open');
+document.getElementById('overlay').onclick = (e)=>{ if(e.target.id==='overlay') document.getElementById('overlay').classList.remove('open') };
+document.getElementById('sort').onchange = e=>{state.sort=e.target.value; render()};
+document.getElementById('wall').onchange = e=>{state.wall=e.target.value; render()};
+
+load();
+</script>
+</body>
+</html>

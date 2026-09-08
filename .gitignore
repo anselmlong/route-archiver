@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+data/routes.db
+data/routes.db-*
+.env
+data/chat.json
+data/photos/*.jpg
+data/photos/*.png
+*.log
+.DS_Store
