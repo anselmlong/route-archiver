@@ -117,11 +117,22 @@ def test_canon_wall_arg(bot_module):
 def test_route_admin_buttons_label_reflects_status(bot_module):
     active_route = {"id": 1, "retired_at": None}
     retired_route = {"id": 1, "retired_at": "2024-01-01 00:00:00"}
-    active_kb = bot_module._route_admin_buttons(active_route)
-    retired_kb = bot_module._route_admin_buttons(retired_route)
+    active_kb = bot_module._route_admin_buttons(active_route, admin=True)
+    retired_kb = bot_module._route_admin_buttons(retired_route, admin=True)
     assert active_kb.inline_keyboard[1][0].text == "🪨 Retire"
     assert active_kb.inline_keyboard[1][0].callback_data == "retire:1"
     assert retired_kb.inline_keyboard[1][0].text == "♻️ Restore"
+
+
+def test_route_admin_buttons_hidden_for_non_admin(bot_module):
+    route = {"id": 1, "retired_at": None}
+    kb = bot_module._route_admin_buttons(route, admin=False)
+    texts = [btn.text for row in kb.inline_keyboard for btn in row]
+    assert "✏️ Edit" not in texts
+    assert "🗑 Delete" not in texts
+    assert "🪨 Retire" not in texts
+    assert "🗂 Open collection" in texts  # public link always present
+    assert len(kb.inline_keyboard) == 1  # only the open-collection row
 
 
 # --------------------------------------------------------------------------- #

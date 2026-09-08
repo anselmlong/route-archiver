@@ -108,23 +108,24 @@ def _canon_wall_arg(raw: str):
     return _WALL_ARG_CANON.get(raw.strip().lower())
 
 
-def _route_admin_buttons(route: dict) -> InlineKeyboardMarkup:
-    """Edit/Delete/Retire quick actions attached to a route's message.
+def _route_admin_buttons(route: dict, admin: bool = False) -> InlineKeyboardMarkup:
+    """Quick actions attached to a route's message.
 
-    These stay live on the original message indefinitely (Telegram
-    callback_data is just re-looked-up against the DB, no in-memory
+    Edit/Delete/Retire only render for admins; the "Open collection" link
+    always shows. These stay live on the original message indefinitely
+    (Telegram callback_data is just re-looked-up against the DB, no in-memory
     session), so an admin can scroll back and retire/delete a route weeks
     after it was posted.
     """
-    retire_label = "♻️ Restore" if route.get("retired_at") else "🪨 Retire"
-    rows = [
-        [
+    rows = []
+    if admin:
+        retire_label = "♻️ Restore" if route.get("retired_at") else "🪨 Retire"
+        rows.append([
             InlineKeyboardButton("✏️ Edit", callback_data=f"edit:{route['id']}"),
             InlineKeyboardButton("🗑 Delete", callback_data=f"del:{route['id']}"),
-        ],
-        [InlineKeyboardButton(retire_label, callback_data=f"retire:{route['id']}")],
-        [InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)],
-    ]
+        ])
+        rows.append([InlineKeyboardButton(retire_label, callback_data=f"retire:{route['id']}")])
+    rows.append([InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)])
     return InlineKeyboardMarkup(rows)
 
 
@@ -246,8 +247,8 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         setter_name=setter_name,
         setter_id=setter_id,
     )
-    # admin quick actions on the confirmation
-    kb = _route_admin_buttons(route)
+    # admin-only quick actions on the confirmation
+    kb = _route_admin_buttons(route, admin=_is_admin(setter_id) if setter_id else False)
 
     desc = f"\n📝 {_md_escape(route['description'])}" if route.get("description") else ""
     await msg.reply_text(
@@ -663,7 +664,7 @@ async def _toggle_retire(update: Update, ctx: ContextTypes.DEFAULT_TYPE, route_i
         await update.callback_query.answer("Retired.")
     try:
         await update.callback_query.edit_message_reply_markup(
-            reply_markup=_route_admin_buttons(route)
+            reply_markup=_route_admin_buttons(route, admin=True)
         )
     except Exception as e:
         log.warning("couldn't refresh retire button: %s", e)
@@ -752,6 +753,36 @@ async def cmd_app(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_open(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Alias for /app — opens the route collection."""
+    await update.effective_message.reply_text(
+        "Open the route collection 👇",
+        reply_markup=_app_link({}),
+    )
+
+
+async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Friendly overview of the bot and its commands."""
+    await update.effective_message.reply_text(
+        "🧗 *USC Routes*\n\n"
+        "Setters: just post a photo of a route with its name + grade in the "
+        "right wall topic — I archive it automatically.\n"
+        "`Crack Line V4`\n\n"
+        "*Commands*\n"
+        "/open — open the route collection\n"
+        "/mine — your send history\n"
+        "/leaderboard — top climbers & setters\n"
+        "/hot — what's hot this week\n"
+        "/setter \\<name\\> — a setter's profile\n"
+        "/search \\<name or setter\\> — find a route\n"
+        "/notify [grade] [wall] — DM me new routes you'd like "
+        "(works in a private chat with me)\n\n"
+        "Tap to open the full collection.",
+        parse_mode="Markdown",
+        reply_markup=_app_link({}),
+    )
+
+
 async def _set_menu_button(app) -> None:
     """Pin the Mini App as the bot's menu button (the ⋯ / ⚙️ menu)."""
     try:
@@ -771,6 +802,8 @@ def run():
     app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("notify", cmd_notify))
     app.add_handler(CommandHandler("app", cmd_app))
+    app.add_handler(CommandHandler("open", cmd_open))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("setchat", cmd_setchat))
