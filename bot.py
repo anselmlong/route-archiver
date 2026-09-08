@@ -8,7 +8,7 @@ Runs as a systemd service (see route-archiver.service). No cron, no Hermes.
 """
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -80,40 +80,46 @@ def _app_link(r: dict) -> InlineKeyboardMarkup:
 
 
 async def _topic_wall(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, thread_id: int):
-    """Return the canonical wall for a forum topic, or None.
+    """Return the canonical wall for a forum topic based on its persisted name.
 
-    Resolves the topic name via the raw getForumTopics API (the python lib
-    doesn't wrap the lookup) and maps it through WALL_ALIASES. Cached in
-    ctx.bot_data per (chat, thread) with a TTL so we don't hammer the API.
+    The Bot API has no getForumTopics method (it 404s), so we can't query topic
+    names on demand. Instead we capture the topic name from the
+    forum_topic_created / forum_topic_edited service messages (persisted in
+    data/topic_names.json) and map it through WALL_ALIASES. The "General" topic
+    (thread_id == chat_id) is not a named wall.
     """
     if not thread_id or thread_id == chat_id:
-        return None  # General topic (or no topic) — not a named wall
+        return None  # General topic (or no topic)
 
-    cache = ctx.bot_data.setdefault("topic_cache", {})
-    key = (chat_id, thread_id)
-    hit = cache.get(key)
-    if hit and datetime.now(timezone.utc) - hit["t"] < timedelta(hours=6):
-        return hit["wall"]
+    title = _load_topic_name(chat_id, thread_id)
+    return _norm_wall(title) if title else None
 
-    title = None
+
+TOPIC_NAMES_FILE = BASE_DIR / "data" / "topic_names.json"
+
+
+def _load_topic_name(chat_id: int, thread_id: int):
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/getForumTopics",
-                json={"chat_id": chat_id, "limit": 100},
-            )
-            r.raise_for_status()
-            for t in r.json().get("result", {}).get("forum_topics", []):
-                if t.get("message_thread_id") == thread_id:
-                    title = t.get("name")
-                    break
-    except Exception as e:
-        log.warning("getForumTopics failed: %s", e)
+        import json
+        data = json.loads(TOPIC_NAMES_FILE.read_text())
+    except Exception:
+        data = {}
+    return data.get(str(chat_id), {}).get(str(thread_id))
 
-    wall = _norm_wall(title) if title else None
-    cache[key] = {"wall": wall, "t": datetime.now(timezone.utc)}
-    return wall
+
+def _remember_topic(chat_id: int, thread_id: int, name: str):
+    if not name or not thread_id:
+        return
+    import json
+    try:
+        data = json.loads(TOPIC_NAMES_FILE.read_text()) if TOPIC_NAMES_FILE.exists() else {}
+    except Exception:
+        data = {}
+    data.setdefault(str(chat_id), {})[str(thread_id)] = name
+    try:
+        TOPIC_NAMES_FILE.write_text(json.dumps(data))
+    except Exception as e:
+        log.warning("couldn't save topic name: %s", e)
 
 
 # --------------------------------------------------------------------------- #
@@ -196,6 +202,24 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=kb,
     )
+
+
+async def on_topic_event(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Capture forum topic names from create/edit service messages so we can
+    resolve a photo's wall from the topic it was posted in."""
+    msg = update.effective_message
+    if not msg or not msg.chat:
+        return
+    created = getattr(msg, "forum_topic_created", None)
+    edited = getattr(msg, "forum_topic_edited", None)
+    name = None
+    if created:
+        name = getattr(created, "name", None)
+    elif edited:
+        name = getattr(edited, "name", None)
+    tid = getattr(msg, "message_thread_id", None) or msg.chat.id
+    _remember_topic(msg.chat.id, tid, name)
+    log.info("remembered topic %s: %r", tid, name)
 
 
 # --------------------------------------------------------------------------- #
@@ -372,6 +396,9 @@ def run():
     app.add_handler(CommandHandler("setchat", cmd_setchat))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CallbackQueryHandler(on_callback))
+    # topic create/edit service messages -> capture the topic name
+    svc = filters.StatusUpdate.FORUM_TOPIC_CREATED | filters.StatusUpdate.FORUM_TOPIC_EDITED
+    app.add_handler(MessageHandler(svc, on_topic_event))
     # photo first so captioned photos archive; text (admin edit) after commands
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

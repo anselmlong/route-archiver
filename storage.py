@@ -28,11 +28,14 @@ _FULL_IDX = {g: i for i, g in enumerate(_FULL)}
 WALL_ALIASES = {
     "left": "left vertical", "left wall": "left vertical",
     "left vertical": "left vertical", "vertical": "left vertical",
+    "vertical (left)": "left vertical", "left (vertical)": "left vertical",
     "middle": "middle overhang", "middle overhang": "middle overhang",
     "overhang": "middle overhang", "overhang wall": "middle overhang",
     "cave": "middle overhang",
+    "overhang (middle)": "middle overhang", "middle (overhang)": "middle overhang",
     "right": "right slab", "right wall": "right slab",
     "right slab": "right slab", "slab": "right slab",
+    "slab (right)": "right slab", "right (slab)": "right slab",
 }
 
 # token-ish grade regex: VB, V0..V17, optional +, optional range.
