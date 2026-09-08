@@ -240,7 +240,7 @@ async function rate(id,val){
   try{
     const res=await fetch(`/api/rate/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json();
-    if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
+    if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
     const r=state.routes.find(x=>x.id===id);
     if(r&&d.avg!==undefined){r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating}
     paint();

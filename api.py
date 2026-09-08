@@ -6,6 +6,7 @@ Reads the same SQLite the bot writes to. Static frontend in ./static. Run via:
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 import urllib.parse
@@ -19,6 +20,7 @@ from storage import V_ORDER, Storage
 
 BASE_DIR = Path(__file__).parent
 storage = Storage()
+log = logging.getLogger("api")
 
 # Bot token is only used to cryptographically verify Telegram Mini App init data
 # (so ratings/ticks are scoped to real Telegram users, one per person per route).
@@ -32,8 +34,8 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 # Telegram Mini App initData validation
 # --------------------------------------------------------------------------- #
 def _init_secret():
-    # secret_key = HMAC-SHA256(key=bot_token, msg="WebAppData")
-    return hmac.new(BOT_TOKEN.encode(), b"WebAppData", hashlib.sha256).digest()
+    # Telegram: secret_key = HMAC-SHA256(key="WebAppData", msg=bot_token)
+    return hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
 
 
 def validate_init_data(raw: str, max_age: int = 86400):
@@ -126,6 +128,7 @@ async def rate(route_id: int, request: Request):
     try:
         uid, name = _identity(body, request)
     except ValueError as e:
+        log.warning("rate %s rejected: %s", route_id, e)
         return JSONResponse(status_code=401, content={"error": str(e)})
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
