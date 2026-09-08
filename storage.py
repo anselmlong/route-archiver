@@ -329,6 +329,104 @@ class Storage:
             )
             # legacy up/down votes table is gone; drop any stale one from an old deploy
             conn.execute("DROP TABLE IF EXISTS votes")
+            # usage analytics: one lightweight row per action (no heavy deps)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS events (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind       TEXT NOT NULL,
+                    tg_user_id INTEGER,
+                    route_id   INTEGER,
+                    payload    TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON events(tg_user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_day ON events(created_at)")
+
+    # ---- usage analytics ------------------------------------------------
+    def track(self, kind: str, tg_user_id=None, route_id=None, payload=None):
+        """Record a lightweight usage event (view/rate/tick/command/new-route)."""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO events (kind, tg_user_id, route_id, payload) VALUES (?,?,?,?)",
+                (kind, tg_user_id, route_id, payload),
+            )
+
+    # bump counters inside high-frequency paths *without* waiting on the write
+    def track_route_view(self, tg_user_id=None, route_id=None):
+        self.track("view", tg_user_id, route_id)
+
+    def analytics(self, days: int = 14):
+        """Aggregate usage analytics for the last `days` days.
+
+        Returns unique users, event counts, top routes, ratings/ticks traffic,
+        and subscription count — everything admin needs without heavy deps.
+        Also prunes events older than 90 days so the table stays small.
+        """
+        with self._lock, self._connect() as conn:
+            # prune old events (low-volume club traffic; 90 days is plenty)
+            conn.execute(
+                "DELETE FROM events WHERE created_at < datetime('now','-90 days')"
+            )
+            u = conn.execute(
+                "SELECT COUNT(DISTINCT tg_user_id) c FROM events "
+                "WHERE created_at >= datetime('now', ?)",
+                (f"-{days} days",),
+            ).fetchone()["c"]
+
+            total_users = conn.execute(
+                "SELECT COUNT(DISTINCT tg_user_id) c FROM events"
+            ).fetchone()["c"]
+
+            by_kind = {
+                r["kind"]: r["c"]
+                for r in conn.execute(
+                    "SELECT kind, COUNT(*) c FROM events "
+                    "WHERE created_at >= datetime('now', ?) GROUP BY kind",
+                    (f"-{days} days",),
+                ).fetchall()
+            }
+
+            top_routes = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT route_id, COUNT(*) c FROM events "
+                    "WHERE kind='view' AND route_id IS NOT NULL "
+                    "AND created_at >= datetime('now', ?) "
+                    "GROUP BY route_id ORDER BY c DESC LIMIT 8",
+                    (f"-{days} days",),
+                ).fetchall()
+            ]
+            for t in top_routes:
+                r = self.get_route(t["route_id"])
+                t["name"] = r["name"] if r else f"route#{t['route_id']}"
+
+            day_activity = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT substr(created_at,1,10) day, COUNT(*) c FROM events "
+                    "WHERE created_at >= datetime('now', ?) "
+                    "GROUP BY day ORDER BY day",
+                    (f"-{days} days",),
+                ).fetchall()
+            ]
+
+        sub_count = conn.execute(
+            "SELECT COUNT(*) c FROM subscriptions"
+        ).fetchone()["c"]
+
+        return {
+            "days": days,
+            "active_users": u,
+            "total_known_users": total_users,
+            "events": by_kind,
+            "top_routes": top_routes,
+            "activity_by_day": day_activity,
+            "subscriptions": sub_count,
+        }
 
     def add_route(self, *, name, grade, grade_low, wall=None, description=None,
                   photo_path=None, photo_fid=None,

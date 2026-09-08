@@ -24,6 +24,8 @@ BASE_DIR = Path(__file__).parent
 storage = Storage()
 log = logging.getLogger("api")
 
+ADMINS = {int(x) for x in os.environ.get("ADMIN_IDS", "495290408").split(",") if x.strip()}
+
 # Bot token is only used to cryptographically verify Telegram Mini App init data
 # (so ratings/ticks are scoped to real Telegram users, one per person per route).
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
@@ -147,6 +149,9 @@ def routes(request: Request, grade: str | None = None, wall: str | None = None,
     for r in rows:
         r.pop("photo_path", None)
         r.pop("_id", None)
+    # usage analytics: a collection load = one user session; first route is the
+    # "featured" one if present, but we won't write a view per route here
+    storage.track("session", tg_user_id=viewer, payload=f"status={status}")
     return {"routes": rows}
 
 
@@ -160,6 +165,7 @@ async def rate(route_id: int, body: RateBody, request: Request):
         return JSONResponse(status_code=401, content={"error": str(e)})
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
+    storage.track("rate", tg_user_id=uid, route_id=route_id, payload=str(body.value))
     return storage.set_rating(route_id, uid, name, body.value)
 
 
@@ -172,6 +178,8 @@ async def tick(route_id: int, body: TickBody, request: Request):
         return JSONResponse(status_code=401, content={"error": str(e)})
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
+    storage.track("tick", tg_user_id=uid, route_id=route_id,
+                  payload=body.suggested_grade or "")
     return storage.toggle_tick(route_id, uid, name, body.suggested_grade)
 
 
@@ -368,14 +376,37 @@ def setter(setter_id: int, request: Request, tg: str | None = None):
 
 
 @app.get("/api/photo/{route_id}")
-def photo(route_id: int):
+def photo(route_id: int, request: Request, tg: str | None = None):
     r = storage.get_route(route_id)
     if not r or not r.get("photo_path"):
         raise HTTPException(404, "no photo")
     p = Path(r["photo_path"])
     if not p.exists():
         raise HTTPException(404, "photo missing")
+    # usage analytics: a photo load = a route view
+    viewer = None
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    if raw:
+        try:
+            viewer, _ = validate_init_data(raw)
+        except ValueError:
+            viewer = None
+    storage.track("view", tg_user_id=viewer, route_id=route_id)
     return FileResponse(str(p))
+
+
+@app.get("/api/analytics")
+def analytics(request: Request, days: int = 14, tg: str | None = None):
+    """Admin-only usage analytics: active/known users, event counts, top routes."""
+    days = max(1, min(days, 90))
+    raw = tg or request.headers.get("X-Telegram-Init-Data", "")
+    try:
+        uid, _ = validate_init_data(raw)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+    if uid not in ADMINS:
+        return JSONResponse(status_code=403, content={"error": "admins only"})
+    return storage.analytics(days)
 
 
 @app.get("/healthz")

@@ -247,6 +247,8 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         setter_name=setter_name,
         setter_id=setter_id,
     )
+    storage.track("new-route", tg_user_id=setter_id, route_id=route["id"],
+                  payload=route["grade"])
     # admin-only quick actions on the confirmation
     kb = _route_admin_buttons(route, admin=_is_admin(setter_id) if setter_id else False)
 
@@ -783,6 +785,36 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Usage stats: /stats (admins only)."""
+    user = update.effective_user
+    if not user or not _is_admin(user.id):
+        await update.effective_message.reply_text("⛔ admins only.")
+        return
+    a = storage.analytics(14)
+    ev = a["events"]
+    lines = [
+        "📊 *Usage — last 14 days*",
+        f"Active users: {a['active_users']}  ·  known all-time: {a['total_known_users']}",
+        f"Subscriptions: {a['subscriptions']}",
+        "",
+        "*Activity*",
+        f"Route views:  {ev.get('view', 0)}",
+        f"Sessions:     {ev.get('session', 0)}",
+        f"Ratings:      {ev.get('rate', 0)}",
+        f"Ticks:        {ev.get('tick', 0)}",
+        f"New routes:   {ev.get('new-route', 0)}",
+    ]
+    if a["top_routes"]:
+        lines += ["", "*Most-viewed*"]
+        for t in a["top_routes"][:5]:
+            lines.append(f"{t['c']}×  {t['name']}")
+    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+# --------------------------------------------------------------------------- #
+# bot setup
+# --------------------------------------------------------------------------- #
 async def _set_menu_button(app) -> None:
     """Pin the Mini App as the bot's menu button (the ⋯ / ⚙️ menu)."""
     try:
@@ -804,6 +836,7 @@ def run():
     app.add_handler(CommandHandler("app", cmd_app))
     app.add_handler(CommandHandler("open", cmd_open))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("setchat", cmd_setchat))

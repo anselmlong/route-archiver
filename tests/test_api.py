@@ -576,3 +576,25 @@ def test_index_serves_html(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "USC Routes" in r.text
+
+
+# --------------------------------------------------------------------------- #
+# usage analytics endpoint
+# --------------------------------------------------------------------------- #
+def test_analytics_requires_admin(client, api_module):
+    # non-admin user -> 403
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=999)
+    r = client.get("/api/analytics", params={"tg": raw})
+    assert r.status_code == 403
+
+
+def test_analytics_returns_counts_for_admin(client, api_module):
+    api_module.storage.track("view", tg_user_id=111, route_id=1)
+    api_module.storage.track("session", tg_user_id=111)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=495290408)  # default admin
+    r = client.get("/api/analytics", params={"tg": raw})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["active_users"] == 1
+    assert body["events"]["view"] == 1
+    assert body["events"]["session"] == 1

@@ -689,3 +689,28 @@ def test_matching_subscribers_any_grade_includes_wildcard_routes(storage):
 def test_matching_subscribers_specific_wall_excludes_wallless_route(storage):
     storage.subscribe(1, 111, wall="Left")
     assert storage.matching_subscribers(5, None) == []
+
+
+# --------------------------------------------------------------------------- #
+# usage analytics
+# --------------------------------------------------------------------------- #
+def test_track_and_analytics_aggregate(storage):
+    storage.track("view", tg_user_id=1, route_id=10)
+    storage.track("view", tg_user_id=2, route_id=10)
+    storage.track("view", tg_user_id=1, route_id=20)
+    storage.track("rate", tg_user_id=1, route_id=10, payload="5")
+    storage.track("tick", tg_user_id=2, route_id=10, payload="V4")
+    storage.track("new-route", tg_user_id=1, route_id=30, payload="V6")
+
+    a = storage.analytics(days=14)
+    assert a["active_users"] == 2
+    assert a["total_known_users"] == 2
+    assert a["events"]["view"] == 3
+    assert a["events"]["rate"] == 1
+    assert a["events"]["tick"] == 1
+    assert a["events"]["new-route"] == 1
+    assert a["subscriptions"] == 0
+    # top viewed route = 10 (2 views)
+    assert a["top_routes"][0]["route_id"] == 10
+    assert a["top_routes"][0]["c"] == 2
+    assert a["activity_by_day"]
