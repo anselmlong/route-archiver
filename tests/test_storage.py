@@ -362,3 +362,65 @@ def test_leaderboard_setters_includes_retired_routes(storage):
     r = storage.add_route(name="A", grade="V1", grade_low=1, setter_name="Sam", setter_id=10)
     storage.retire_route(r["id"])
     assert storage.leaderboard_setters()[0]["routes_set"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Storage: crowd-sourced grade consensus
+# --------------------------------------------------------------------------- #
+def test_grade_low_from_free_text_parses_and_clamps(storage_module):
+    f = storage_module._grade_low_from_free_text
+    assert f("V5") == storage_module._V_IDX["V5"]
+    assert f("feels harder, maybe v6") == storage_module._V_IDX["V6"]
+    assert f("V12+") == storage_module.MAX_IDX  # clamps like caption parsing does
+    assert f("just a note, no grade") is None
+    assert f("") is None
+    assert f(None) is None
+    assert f("V?") is None  # wildcard doesn't contribute a number
+
+
+def test_consensus_grade_absent_when_no_suggestions(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.toggle_tick(r["id"], tg_user_id=1, tg_user_name="Bob")  # no suggested_grade
+    rows = storage.list_routes()
+    storage.attach_ratings_and_ticks(rows)
+    assert rows[0]["consensus_grade"] is None
+    assert rows[0]["consensus_count"] == 0
+
+
+def test_consensus_grade_ignores_unparseable_suggestions(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.toggle_tick(r["id"], tg_user_id=1, tg_user_name="Bob", suggested_grade="feels sandbagged")
+    storage.toggle_tick(r["id"], tg_user_id=2, tg_user_name="Cat", suggested_grade="V5")
+    rows = storage.list_routes()
+    storage.attach_ratings_and_ticks(rows)
+    assert rows[0]["consensus_grade"] == "V5"
+    assert rows[0]["consensus_count"] == 1
+
+
+def test_consensus_grade_is_median_odd_count(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    for uid, g in [(1, "V3"), (2, "V5"), (3, "V7")]:
+        storage.toggle_tick(r["id"], tg_user_id=uid, tg_user_name=f"U{uid}", suggested_grade=g)
+    rows = storage.list_routes()
+    storage.attach_ratings_and_ticks(rows)
+    assert rows[0]["consensus_grade"] == "V5"
+    assert rows[0]["consensus_count"] == 3
+
+
+def test_consensus_grade_updates_when_tick_grade_changed(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.toggle_tick(r["id"], tg_user_id=1, tg_user_name="Bob", suggested_grade="V3")
+    storage.set_tick_grade(r["id"], tg_user_id=1, suggested_grade="V7")
+    rows = storage.list_routes()
+    storage.attach_ratings_and_ticks(rows)
+    assert rows[0]["consensus_grade"] == "V7"
+
+
+def test_consensus_grade_untick_removes_its_contribution(storage):
+    r = storage.add_route(name="A", grade="V4", grade_low=5)
+    storage.toggle_tick(r["id"], tg_user_id=1, tg_user_name="Bob", suggested_grade="V3")
+    storage.toggle_tick(r["id"], tg_user_id=1, tg_user_name="Bob")  # toggles off
+    rows = storage.list_routes()
+    storage.attach_ratings_and_ticks(rows)
+    assert rows[0]["consensus_grade"] is None
+    assert rows[0]["consensus_count"] == 0

@@ -88,6 +88,8 @@
   .rg span.g{color:#151008;background:var(--accent);border-color:var(--accent);font-weight:700}
   .rg .retired{font-size:10.5px;padding:2px 8px;border-color:var(--dim);text-transform:uppercase;letter-spacing:.03em}
   .sheet h2{font-size:18px;letter-spacing:-.01em;margin-top:4px}
+  .consensus{font-size:12.5px;color:var(--muted);margin:2px 0 4px}
+  .consensus b{color:var(--text)}
   .dd{color:var(--muted);font-size:13.5px;line-height:1.5;margin-top:10px}
   .foot{color:var(--muted);font-size:12.5px;margin-top:12px}
 
@@ -157,6 +159,7 @@
     <img id="simg" alt="">
     <div class="sbody">
       <div class="rg"><span class="g" id="sgrade"></span><span id="swall" hidden></span><span class="retired" id="sretired" hidden>Retired</span></div>
+      <div class="consensus" id="sconsensus" hidden></div>
       <h2 id="sname"></h2>
       <div class="dd" id="sdesc" hidden></div>
 
@@ -417,6 +420,13 @@ function refreshSheet(){
   $("#sgrade").textContent=r.grade;
   const w=$("#swall"); w.hidden=!r.wall; w.textContent="🧗 "+r.wall;
   $("#sretired").hidden=!r.retired_at;
+  const cons=$("#sconsensus");
+  if(r.consensus_grade&&r.consensus_count>0){
+    cons.hidden=false;
+    cons.innerHTML=`Community grade: <b>${esc(r.consensus_grade)}</b> · ${r.consensus_count} suggestion${r.consensus_count===1?"":"s"}`;
+  }else{
+    cons.hidden=true;
+  }
   $("#sname").textContent=r.name;
   const dd=$("#sdesc"); dd.hidden=!r.description; dd.textContent=r.description;
   $("#savg").textContent=`${fmtAvg(r.avg_rating)} ★ · ${r.rating_count||0} ratings`;

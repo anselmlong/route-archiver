@@ -37,6 +37,11 @@ they just keep posting route pics.
 - **Leaderboards** — `/leaderboard` (bot) or the mini-app's "Leaderboard"
   tab: top climbers by send count (with each one's hardest grade) and top
   setters by routes archived.
+- **Crowd-sourced grade consensus** — when ticking a route, climbers can
+  suggest a grade; the mini-app's detail sheet shows the community's median
+  suggestion (and how many people weighed in) alongside the setter's own
+  grade. Free-text suggestions that don't parse as a V-grade are simply
+  excluded, not rejected.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |

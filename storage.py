@@ -109,6 +109,28 @@ def _parse_grade_token(tok: str):
     return _clamp_grade(display)
 
 
+def _grade_low_from_free_text(raw):
+    """Best-effort parse of a free-form suggested-grade string (from a
+    tick) into a normalized grade_low sort index, or None if it doesn't
+    look like a V-grade. Used for the crowd-sourced grade consensus --
+    garbage input (typos, "feels harder", etc.) is simply excluded rather
+    than rejected, since suggested_grade is never validated at write time.
+    """
+    if not raw:
+        return None
+    m = _GRADE_RE.search(raw)
+    if not m:
+        return None
+    token = _norm_grade(m.group(0))
+    if token in ("V?", "V"):
+        return None  # a wildcard suggestion doesn't contribute a number
+    try:
+        _, grade_low = _parse_grade_token(token)
+    except GradeError:
+        return None
+    return grade_low
+
+
 def _norm_wall(w):
     if not w:
         return None
@@ -266,6 +288,13 @@ class Storage:
                 )
                 """
             )
+            tick_cols = {c[1] for c in conn.execute("PRAGMA table_info(ticks)").fetchall()}
+            if "suggested_grade_low" not in tick_cols:
+                # normalized sort index for suggested_grade, computed at
+                # write time so the grade consensus can aggregate without
+                # re-parsing free text on every read. NULL when the
+                # suggestion doesn't parse as a V-grade.
+                conn.execute("ALTER TABLE ticks ADD COLUMN suggested_grade_low INTEGER")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_route ON ticks(route_id)")
             # legacy up/down votes table is gone; drop any stale one from an old deploy
             conn.execute("DROP TABLE IF EXISTS votes")
@@ -469,10 +498,12 @@ class Storage:
                 )
                 ticked = False
             else:
+                cleaned = _clean_free(suggested_grade) if suggested_grade else None
                 conn.execute(
-                    "INSERT INTO ticks (route_id, tg_user_id, tg_user_name, suggested_grade) VALUES (?,?,?,?)",
-                    (route_id, tg_user_id, tg_user_name,
-                     _clean_free(suggested_grade) if suggested_grade else None),
+                    "INSERT INTO ticks (route_id, tg_user_id, tg_user_name, "
+                    "suggested_grade, suggested_grade_low) VALUES (?,?,?,?,?)",
+                    (route_id, tg_user_id, tg_user_name, cleaned,
+                     _grade_low_from_free_text(cleaned)),
                 )
                 ticked = True
         count = self._tick_count(route_id)
@@ -481,12 +512,12 @@ class Storage:
 
     def set_tick_grade(self, route_id, tg_user_id, suggested_grade):
         """Update the suggested grade on an existing tick."""
+        cleaned = _clean_free(suggested_grade) if suggested_grade else None
         with self._lock, self._connect() as conn:
             conn.execute(
-                "UPDATE ticks SET suggested_grade=?, updated_at=datetime('now') "
-                "WHERE route_id=? AND tg_user_id=?",
-                (_clean_free(suggested_grade) if suggested_grade else None,
-                 route_id, tg_user_id),
+                "UPDATE ticks SET suggested_grade=?, suggested_grade_low=?, "
+                "updated_at=datetime('now') WHERE route_id=? AND tg_user_id=?",
+                (cleaned, _grade_low_from_free_text(cleaned), route_id, tg_user_id),
             )
 
     def _tick_count(self, route_id):
@@ -573,6 +604,12 @@ class Storage:
                 f"WHERE route_id IN ({marks}) GROUP BY route_id",
                 ids,
             ).fetchall()
+            consensus_rows = conn.execute(
+                f"SELECT route_id, suggested_grade_low FROM ticks "
+                f"WHERE route_id IN ({marks}) AND suggested_grade_low IS NOT NULL "
+                f"ORDER BY route_id, suggested_grade_low",
+                ids,
+            ).fetchall()
             mine_r = {}
             mine_t = {}
             mine_tg = {}
@@ -593,6 +630,9 @@ class Storage:
         by_id = {r["id"]: r for r in routes}
         agg_r = {r["route_id"]: r for r in rating_rows}
         agg_t = {r["route_id"]: r for r in tick_rows}
+        consensus_values = {}
+        for row in consensus_rows:
+            consensus_values.setdefault(row["route_id"], []).append(row["suggested_grade_low"])
         for rid, r in by_id.items():
             ar = agg_r.get(rid)
             at = agg_t.get(rid)
@@ -602,7 +642,23 @@ class Storage:
             r["tick_count"] = at["c"] if at else 0
             r["my_tick"] = 1 if rid in mine_t else 0
             r["my_suggested_grade"] = mine_tg.get(rid)
+            r["consensus_grade"], r["consensus_count"] = self._consensus_from_values(
+                consensus_values.get(rid, [])
+            )
         return routes
+
+    @staticmethod
+    def _consensus_from_values(values):
+        """Crowd-sourced grade consensus from a sorted list of valid
+        suggested_grade_low values: the median, mapped back to its V-grade
+        display. (values, sorted) -> (display_or_None, count)."""
+        if not values:
+            return None, 0
+        n = len(values)
+        mid = n // 2
+        median_low = values[mid] if n % 2 else round((values[mid - 1] + values[mid]) / 2)
+        display = V_ORDER[median_low] if 0 <= median_low < len(V_ORDER) else None
+        return display, n
 
     def stats(self):
         with self._lock, self._connect() as conn:

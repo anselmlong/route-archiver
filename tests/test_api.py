@@ -132,6 +132,15 @@ def test_routes_hides_internal_fields(client, api_module):
     assert "_id" not in row
 
 
+def test_routes_includes_grade_consensus(client, api_module):
+    route = _seed_route(api_module, grade="V4", grade_low=5)
+    api_module.storage.toggle_tick(route["id"], tg_user_id=1, tg_user_name="Bob", suggested_grade="V5")
+    api_module.storage.toggle_tick(route["id"], tg_user_id=2, tg_user_name="Cat", suggested_grade="not a grade")
+    row = client.get("/api/routes").json()["routes"][0]
+    assert row["consensus_grade"] == "V5"
+    assert row["consensus_count"] == 1
+
+
 def test_routes_filters_by_grade_and_wall(client, api_module):
     _seed_route(api_module, name="Easy", grade="V1", grade_low=1, wall="Left")
     _seed_route(api_module, name="Hard", grade="V6", grade_low=7, wall="Right")
@@ -311,6 +320,7 @@ def test_me_returns_only_my_ticks_shaped_like_routes(client, api_module):
     row = body["routes"][0]
     assert "my_tick" in row and row["my_tick"] == 1
     assert "photo_path" not in row
+    assert "consensus_grade" in row and "consensus_count" in row
 
 
 def test_me_includes_retired_routes_and_grade_pyramid(client, api_module):

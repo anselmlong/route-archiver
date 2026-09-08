@@ -27,6 +27,28 @@ def _free_port():
         return s.getsockname()[1]
 
 
+def _boot_server(app):
+    """Start a uvicorn server for `app` on a free port in a daemon thread,
+    block until /healthz responds, and return (base_url, server, thread).
+    Caller is responsible for server.should_exit=True + thread.join()."""
+    port = _free_port()
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{port}"
+    for _ in range(100):
+        try:
+            import urllib.request
+            urllib.request.urlopen(f"{base_url}/healthz", timeout=0.2)
+            break
+        except Exception:
+            time.sleep(0.05)
+    else:
+        raise RuntimeError("live server never came up")
+    return base_url, server, thread
+
+
 @pytest.fixture
 def live_server(tmp_path, monkeypatch):
     monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
@@ -52,24 +74,35 @@ def live_server(tmp_path, monkeypatch):
     s.toggle_tick(r3["id"], tg_user_id=1, tg_user_name="A")
     s.retire_route(r3["id"])
 
-    port = _free_port()
-    config = uvicorn.Config(api_mod.app, host="127.0.0.1", port=port, log_level="error")
-    server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    base_url = f"http://127.0.0.1:{port}"
-    for _ in range(100):
-        try:
-            import urllib.request
-            urllib.request.urlopen(f"{base_url}/healthz", timeout=0.2)
-            break
-        except Exception:
-            time.sleep(0.05)
-    else:
-        raise RuntimeError("live server never came up")
-
+    base_url, server, thread = _boot_server(api_mod.app)
     yield {"base_url": base_url, "route1": r1, "route2": r2, "route3_retired": r3, "storage": s}
+    server.should_exit = True
+    thread.join(timeout=5)
 
+
+@pytest.fixture
+def consensus_live_server(tmp_path, monkeypatch):
+    """A separate, minimal live server (not the shared `live_server`
+    fixture) so grade-consensus seed data doesn't perturb the route/tick
+    counts other tests assert on."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "consensus_test.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+
+    photo = tmp_path / "route.png"
+    photo.write_bytes(_PNG_1PX)
+
+    s = api_mod.storage
+    route = s.add_route(name="Debated Line", grade="V4", grade_low=5, wall="Left",
+                         photo_path=str(photo))
+    s.toggle_tick(route["id"], tg_user_id=1, tg_user_name="A", suggested_grade="V4")
+    s.toggle_tick(route["id"], tg_user_id=2, tg_user_name="B", suggested_grade="V6")
+
+    base_url, server, thread = _boot_server(api_mod.app)
+    yield {"base_url": base_url, "route": route}
     server.should_exit = True
     thread.join(timeout=5)
 
@@ -349,3 +382,39 @@ def test_leaderboard_view_shows_climber_ranking(authed_page):
     assert "2 sends" in text
     # no route in the fixture has a setter_name, so the setter board is empty
     assert "No routes set yet" in text
+
+
+# --------------------------------------------------------------------------- #
+# Grade consensus
+# --------------------------------------------------------------------------- #
+def test_consensus_grade_shown_in_detail_sheet(consensus_live_server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(consensus_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        pg.locator(".card", has_text="Debated Line").click()
+        pg.wait_for_selector(".scrim.open")
+        text = pg.locator("#sconsensus").inner_text()
+        assert "V5" in text
+        assert "2 suggestions" in text
+        browser.close()
+
+
+def test_consensus_grade_shown_when_a_single_suggestion_exists(page):
+    """Crack Line has exactly one tick with a parseable suggested_grade
+    ("V4", matching the setter's own grade) -- consensus should still
+    surface it, count and all."""
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    text = page.locator("#sconsensus").inner_text()
+    assert "V4" in text
+    assert "1 suggestion" in text
+
+
+def test_consensus_grade_hidden_when_no_ticks(page):
+    """The 'Weird Name' route has no ticks at all in the fixture, so
+    there's nothing to build a consensus from."""
+    page.locator(".card", has_text="Weird").click()
+    page.wait_for_selector(".scrim.open")
+    assert not page.locator("#sconsensus").is_visible()
