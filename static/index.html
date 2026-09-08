@@ -36,6 +36,16 @@
   .card .name{font-weight:600;font-size:.92rem;line-height:1.2}
   .card .grade{color:var(--accent);font-weight:700;font-size:.9rem}
   .card .wall{color:var(--muted);font-size:.78rem}
+  .card .desc{color:var(--muted);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* voting */
+  .up,.down{background:none;border:1px solid var(--border);color:var(--muted);width:38px;height:34px;
+    font-size:1rem;border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+    transition:background .1s}
+  .up.on,.up:hover{background:var(--accent);color:#131415;border-color:var(--accent)}
+  .down.on,.down:hover{background:#e0525f;color:#fff;border-color:#e0525f}
+  .score{min-width:28px;text-align:center;font-weight:700;font-size:1.02rem}
+  .score.pos{color:var(--accent)} .score.neg{color:#e0525f}
+  .voterow{display:flex;align-items:center;gap:8px;margin-top:2px}
   .empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:40px 0}
   .count{color:var(--muted);font-size:.8rem;padding:2px 16px 0}
   .topbar{display:flex;justify-content:space-between;align-items:center}
@@ -54,6 +64,7 @@
   .badge{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
     padding:5px 10px;font-size:.85rem;display:flex;align-items:center;gap:5px}
   .badge.grade{color:#131415;background:var(--accent);border-color:var(--accent);font-weight:700}
+  .sheet .desc{color:var(--muted);font-size:.92rem;line-height:1.4;margin:14px 0 2px}
   .sheet .setter{color:var(--muted);font-size:.88rem;margin-top:8px}
   .sheet .date{color:var(--muted);font-size:.78rem;margin-top:4px}
   .close{position:sticky;top:0;float:right;margin:10px 10px -40px 0;z-index:1;
@@ -93,6 +104,12 @@
         <span class="badge grade" id="dgrade"></span>
         <span class="badge" id="dwall"></span>
       </div>
+      <div class="desc" id="ddesc"></div>
+      <div class="voterow">
+        <button class="up" id="dup">▲</button>
+        <span class="score" id="dscore">0</span>
+        <button class="down" id="ddn">▼</button>
+      </div>
       <div class="setter" id="dsetter"></div>
       <div class="date" id="ddate"></div>
     </div>
@@ -100,7 +117,7 @@
 </div>
 
 <script>
-const state = {routes:[], grade:"", wall:"", sort:"grade", gradeIdx:{}};
+const state = {routes:[], grade:"", wall:"", sort:"grade", gradeIdx:{}, cur:null, initData:""};
 
 // ---- Telegram Mini App init ----
 (function initTg(){
@@ -108,6 +125,8 @@ const state = {routes:[], grade:"", wall:"", sort:"grade", gradeIdx:{}};
     window.Telegram.WebApp.ready();
     window.Telegram.WebApp.expand();
     window.Telegram.WebApp.setHeaderColor && window.Telegram.WebApp.setHeaderColor('#0f1115');
+    // raw initData so the server can verify the Telegram user for voting
+    if (window.Telegram.WebApp.initData) state.initData = window.Telegram.WebApp.initData;
     const u = window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user;
     if (u && u.first_name){
       const el = document.getElementById('subline');
@@ -116,9 +135,15 @@ const state = {routes:[], grade:"", wall:"", sort:"grade", gradeIdx:{}};
   }
 })();
 
+function apiHeaders(){
+  const h = {'Content-Type':'application/json'};
+  if (state.initData) h['X-Telegram-Init-Data'] = state.initData;
+  return h;
+}
+
 async function load(){
   const [r,k] = await Promise.all([
-    fetch('/api/routes').then(r=>r.json()),
+    fetch('/api/routes', {headers: apiHeaders()}).then(r=>r.json()),
     fetch('/api/meta').then(r=>r.json())
   ]);
   state.routes = r.routes;
@@ -150,6 +175,8 @@ function renderMeta(k){
 function esc(s){return String(s ?? '').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function fmtDate(d){try{const dt=new Date(d.replace(' ','T')+'Z');return dt.toLocaleDateString(undefined,{day:'numeric',month:'short'})}catch(e){return d}}
 
+function scoreClass(score){return score>0?'pos':(score<0?'neg':'')}
+
 function render(){
   const grid = document.getElementById('grid');
   let list = state.routes;
@@ -171,18 +198,53 @@ function render(){
         <div class="name">${esc(r.name)}</div>
         <div class="grade">${esc(r.grade)}</div>
         ${r.wall?`<div class="wall">${esc(r.wall)}</div>`:''}
+        ${r.description?`<div class="desc">${esc(r.description)}</div>`:''}
+        <div class="voterow">
+          <button class="up${r.my_vote===1?' on':''}" data-vote="1" data-id="${r.id}">▲</button>
+          <span class="score ${scoreClass(r.score)}">${r.score}</span>
+          <button class="down${r.my_vote===-1?' on':''}" data-vote="-1" data-id="${r.id}">▼</button>
+        </div>
       </div>
     </div>`).join('');
   grid.querySelectorAll('.card').forEach(card=>{
-    card.onclick = ()=>{
+    card.onclick = (e)=>{
+      if (e.target.matches('button')) return; // don't open detail when voting
       const id = Number(card.dataset.id);
       const r = state.routes.find(x=>x.id===id);
       if(r) openDetail(r);
     };
   });
+  grid.querySelectorAll('button.up,button.down').forEach(btn=>{
+    const id = Number(btn.dataset.id);
+    const val = Number(btn.dataset.vote);
+    btn.onclick = (e)=>{ e.stopPropagation(); castVote(id,val); };
+  });
+  if (state.cur){
+    const fresh = state.routes.find(x=>x.id===state.cur.id);
+    if (fresh) state.cur = fresh;
+  }
+}
+
+async function castVote(route_id, value){
+  if (!state.initData){
+    alert('Open this via Telegram to vote (so each account gets one vote).');
+    return;
+  }
+  try{
+    const res = await fetch(`/api/vote/${route_id}`, {method:'POST', headers: apiHeaders(), body: JSON.stringify({value})});
+    const d = await res.json();
+    if (res.status===401){ alert('Vote not verified. Reopen the collection from Telegram.'); return; }
+    const r = state.routes.find(x=>x.id===route_id);
+    if (r && d.score!==undefined){ r.upvotes=d.upvotes; r.downvotes=d.downvotes; r.score=d.score; r.my_vote=d.value; }
+    render();
+    if (state.cur && state.cur.id===route_id) openDetail(state.cur);
+  }catch(err){
+    alert('Could not save vote.');
+  }
 }
 
 function openDetail(r){
+  state.cur = r;
   document.getElementById('dimg').src = `/api/photo/${r.id}`;
   document.getElementById('dimg').alt = r.name;
   document.getElementById('dname').textContent = r.name;
@@ -190,8 +252,17 @@ function openDetail(r){
   const wallEl = document.getElementById('dwall');
   if(r.wall){wallEl.style.display='flex'; wallEl.textContent='🧱 '+r.wall}
   else wallEl.style.display='none';
+  const descEl = document.getElementById('ddesc');
+  descEl.style.display = r.description ? 'block' : 'none';
+  if (r.description) descEl.textContent = r.description;
   document.getElementById('dsetter').textContent = r.setter_name ? 'Set by '+r.setter_name : '';
   document.getElementById('ddate').textContent = 'Added '+fmtDate(r.created_at);
+  const up = document.getElementById('dup'), dn = document.getElementById('ddn');
+  up.className = 'up' + (r.my_vote===1?' on':'');
+  dn.className = 'down' + (r.my_vote===-1?' on':'');
+  const sc = document.getElementById('dscore');
+  sc.className = 'score ' + scoreClass(r.score);
+  sc.textContent = r.score;
   document.getElementById('overlay').classList.add('open');
 }
 
@@ -199,6 +270,8 @@ document.getElementById('close').onclick = ()=>document.getElementById('overlay'
 document.getElementById('overlay').onclick = (e)=>{ if(e.target.id==='overlay') document.getElementById('overlay').classList.remove('open') };
 document.getElementById('sort').onchange = e=>{state.sort=e.target.value; render()};
 document.getElementById('wall').onchange = e=>{state.wall=e.target.value; render()};
+document.getElementById('dup').onclick = ()=>state.cur&&castVote(state.cur.id, 1);
+document.getElementById('ddn').onclick = ()=>state.cur&&castVote(state.cur.id, -1);
 
 load();
 </script>

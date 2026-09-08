@@ -178,6 +178,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         grade=parsed["grade"],
         grade_low=parsed["grade_low"],
         wall=wall,
+        description=parsed["description"],
         photo_path=str(dest) if dest else None,
         photo_fid=fid,
         setter_name=setter_name,
@@ -194,9 +195,11 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ]
     kb = InlineKeyboardMarkup(buttons + [[InlineKeyboardButton("🗂 Open collection", url=MINI_APP_LINK)]])
 
+    desc = f"\n📝 {route['description']}" if route.get("description") else ""
     await msg.reply_text(
         f"✅ Archived *{route['name']}* — {route['grade']}"
         + (f" · {route['wall']}" if route.get("wall") else "")
+        + desc
         + (f"\n🧗 Set by {route['setter_name']}" if route.get("setter_name") else "")
         + "\nTap to open the full collection.",
         parse_mode="Markdown",
@@ -345,6 +348,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         grade=parsed["grade"],
         grade_low=parsed["grade_low"],
         wall=parsed["wall"],
+        description=parsed["description"],
     )
     ctx.user_data.pop("editing_route", None)
     await update.effective_message.reply_text(

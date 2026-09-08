@@ -107,25 +107,35 @@ def _clean_name(s: str) -> str:
     return s or DEFAULT_NAME
 
 
-def _extract_wall(after: str):
-    """Return the canonical wall if the tail matches a known section, else None.
+def _clean_free(s: str):
+    """Clean leftover text into a description (or None if empty)."""
+    if not s:
+        return None
+    s = s.strip(" \t\r\n()[]{}.,;:/\\|-@\"'")
+    return s or None
 
-    Matches exact aliases first, then any known wall phrase as a substring, so
-    trailing notes like '(dont break pls)' are ignored instead of becoming walls.
+
+def _split_wall(after: str):
+    """Split the tail text into (canonical_wall_or_None, description_or_None).
+
+    A wall is only recognised when it leads the tail (after stripping
+    separators / brackets), so notes like 'go right at the top' or
+    '(dont break pls)' become a description instead of a wall. The leftover
+    text after the wall phrase is returned as the description.
     """
     if not after:
-        return None
-    cleaned = after.strip(" \t\r\n()[]{}.,;:/\\|-@")
-    if not cleaned:
-        return None
-    low = cleaned.lower()
+        return None, None
+    s = after.strip(" \t\r\n()[]{}.,;:/\\|-@\"'")
+    if not s:
+        return None, None
+    low = s.lower()
     if low in WALL_ALIASES:
-        return WALL_ALIASES[low]
-    # longest phrases first so 'left vertical' wins over bare 'left'
+        return WALL_ALIASES[low], None
+    # longest phrases first so 'left wall' wins over 'left'
     for phrase, canon in sorted(WALL_ALIASES.items(), key=lambda kv: -len(kv[0])):
-        if phrase in low:
-            return canon
-    return None
+        if low.startswith(phrase):
+            return canon, _clean_free(s[len(phrase):])
+    return None, _clean_free(s)
 
 
 def parse_caption(caption: str) -> dict:
@@ -133,7 +143,8 @@ def parse_caption(caption: str) -> dict:
 
     Handles 'Route / V4+ / left vertical', 'juggy one - V4', bare 'V4', and
     'fun route (V3-4) (dont break pls)'. Returns dict with keys: name, grade,
-    grade_low, wall (canonical or None). Raises GradeError if no V-grade found.
+    grade_low, wall (canonical or None), description (str or None). Raises
+    GradeError if no V-grade found.
     """
     if not caption:
         raise GradeError("no caption")
@@ -144,15 +155,16 @@ def parse_caption(caption: str) -> dict:
 
     grade_display, grade_low = _parse_grade_token(m.group(0))
 
-    # name = everything before the grade; wall = matched from the tail
+    # name = the leading label before the grade; wall + description from the tail
     name = _clean_name(caption[: m.start()])
-    wall = _extract_wall(caption[m.end():])
+    wall, description = _split_wall(caption[m.end():])
 
     return {
         "name": name,
         "grade": grade_display,
         "grade_low": grade_low,
         "wall": wall,
+        "description": description,
     }
 
 
@@ -179,6 +191,7 @@ class Storage:
                     grade         TEXT NOT NULL,
                     grade_low     INTEGER NOT NULL,
                     wall          TEXT,
+                    description   TEXT,
                     photo_path    TEXT,
                     photo_fid     TEXT,
                     setter_name   TEXT,
@@ -189,22 +202,44 @@ class Storage:
                 )
                 """
             )
+            # migrate older DBs that lack the description column
+            cols = {c[1] for c in conn.execute("PRAGMA table_info(routes)").fetchall()}
+            if "description" not in cols:
+                conn.execute("ALTER TABLE routes ADD COLUMN description TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_routes_grade ON routes(grade_low)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_routes_wall ON routes(wall)")
+            # one vote (up or down) per user per route
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS votes (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    route_id     INTEGER NOT NULL REFERENCES routes(id),
+                    tg_user_id   INTEGER NOT NULL,
+                    tg_user_name TEXT,
+                    value        INTEGER NOT NULL CHECK (value IN (-1, 1)),
+                    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE (route_id, tg_user_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_votes_route ON votes(route_id)"
+            )
 
-    def add_route(self, *, name, grade, grade_low, wall=None,
+    def add_route(self, *, name, grade, grade_low, wall=None, description=None,
                   photo_path=None, photo_fid=None,
                   setter_name=None, setter_id=None):
         with self._lock, self._connect() as conn:
             cur = conn.execute(
                 """
                 INSERT INTO routes
-                    (name, grade, grade_low, wall, photo_path, photo_fid,
-                     setter_name, setter_id)
-                VALUES (?,?,?,?,?,?,?,?)
+                    (name, grade, grade_low, wall, description, photo_path,
+                     photo_fid, setter_name, setter_id)
+                VALUES (?,?,?,?,?,?,?,?,?)
                 """,
-                (name, grade, grade_low, wall, photo_path, photo_fid,
-                 setter_name, setter_id),
+                (name, grade, grade_low, wall, description, photo_path,
+                 photo_fid, setter_name, setter_id),
             )
             row_id = cur.lastrowid
         return self.get_route(row_id)
@@ -217,7 +252,7 @@ class Storage:
         return dict(row) if row else None
 
     def update_route(self, route_id, **fields):
-        allowed = {"name", "grade", "grade_low", "wall",
+        allowed = {"name", "grade", "grade_low", "wall", "description",
                    "photo_path", "photo_fid", "setter_name", "setter_id"}
         updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
         if not updates:
@@ -269,6 +304,99 @@ class Storage:
             ).fetchall()
         return sorted(r["wall"] for r in rows)
 
+    def set_vote(self, route_id, tg_user_id, tg_user_name, value):
+        """Record (or remove) a user's vote on a route.
+
+        One vote per user per route. Voting with the SAME value again toggles
+        the vote off; a different value switches it up/down. Returns a dict with
+        the user's current vote (1/-1/None) plus the fresh tallies.
+        """
+        value = 1 if value >= 0 else -1
+        new_vote = None
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM votes WHERE route_id=? AND tg_user_id=?",
+                (route_id, tg_user_id),
+            ).fetchone()
+            if row and row["value"] == value:
+                # same vote again -> retract
+                conn.execute(
+                    "DELETE FROM votes WHERE route_id=? AND tg_user_id=?",
+                    (route_id, tg_user_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO votes (route_id, tg_user_id, tg_user_name, value)
+                    VALUES (?,?,?,?)
+                    ON CONFLICT(route_id, tg_user_id)
+                    DO UPDATE SET value=excluded.value,
+                                  tg_user_name=excluded.tg_user_name,
+                                  updated_at=datetime('now')
+                    """,
+                    (route_id, tg_user_id, tg_user_name, value),
+                )
+                new_vote = value
+        out = self._vote_totals(route_id)
+        out["value"] = new_vote
+        return out
+
+    def _vote_totals(self, route_id):
+        with self._lock, self._connect() as conn:
+            up = conn.execute(
+                "SELECT COUNT(*) c FROM votes WHERE route_id=? AND value=1", (route_id,)
+            ).fetchone()["c"]
+            down = conn.execute(
+                "SELECT COUNT(*) c FROM votes WHERE route_id=? AND value=-1", (route_id,)
+            ).fetchone()["c"]
+        return {"upvotes": up, "downvotes": down, "score": up - down}
+
+    def my_vote(self, route_id, tg_user_id):
+        if not tg_user_id:
+            return None
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM votes WHERE route_id=? AND tg_user_id=?",
+                (route_id, tg_user_id),
+            ).fetchone()
+        return row["value"] if row else None
+
+    def attach_votes(self, routes, tg_user_id=None):
+        """Mutate a list of route dicts in place, adding up/down/score/my_vote."""
+        if not routes:
+            return routes
+        ids = [r["id"] for r in routes]
+        marks = ",".join("?" * len(ids))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT route_id, value, COUNT(*) c FROM votes "
+                f"WHERE route_id IN ({marks}) GROUP BY route_id, value",
+                ids,
+            ).fetchall()
+            mine = {}
+            if tg_user_id:
+                for row in conn.execute(
+                    f"SELECT route_id, value FROM votes "
+                    f"WHERE tg_user_id=? AND route_id IN ({marks})",
+                    [tg_user_id] + ids,
+                ).fetchall():
+                    mine[row["route_id"]] = row["value"]
+        by_id = {r["id"]: r for r in routes}
+        up = down = {}
+        for row in rows:
+            if row["value"] == 1:
+                up[row["route_id"]] = row["c"]
+            else:
+                down[row["route_id"]] = row["c"]
+        for rid, r in by_id.items():
+            u = up.get(rid, 0)
+            d = down.get(rid, 0)
+            r["upvotes"] = u
+            r["downvotes"] = d
+            r["score"] = u - d
+            r["my_vote"] = mine.get(rid)
+        return routes
+
     def stats(self):
         with self._lock, self._connect() as conn:
             total = conn.execute(
@@ -282,9 +410,11 @@ if __name__ == "__main__":
     s = Storage()
     for cap in ["Crack Line / V4+ / Left Wall",
                 "Balancy Slab V6",
-                "Overhang Dyno / V8 / Cave",
+                "Overhang Dyno / V8 / Cave / dynamic, big lockoff",
                 "Warmup V2/V3 right",
-                "no grade here"]:
+                "no grade here",
+                "Juggy V4 (dont break pls) big holds",
+                "Sick crimp line V5 left - matchy topout"]:
         try:
             print(cap, "->", parse_caption(cap))
         except GradeError as e:
