@@ -192,7 +192,11 @@ async def tick_grade(route_id: int, body: TickGradeBody, request: Request):
         return JSONResponse(status_code=401, content={"error": str(e)})
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
-    storage.set_tick_grade(route_id, uid, body.suggested_grade)
+    if not storage.set_tick_grade(route_id, uid, body.suggested_grade):
+        # no tick to hang the suggestion on: saying "saved" here would show a
+        # confirmation and a consensus that silently excluded the caller
+        return JSONResponse(status_code=409,
+                            content={"error": "tick this route before suggesting a grade"})
     consensus_grade, consensus_count = storage.route_consensus(route_id)
     return {"ticked": True, "suggested_grade": body.suggested_grade,
             "consensus_grade": consensus_grade, "consensus_count": consensus_count}

@@ -32,7 +32,7 @@ _LEGACY_V_ORDER = [
 # fuller accepted scale for parsing; grades harder than V8+ clamp down to V8+
 _FULL = V_ORDER + [
     "V9", "V9+", "V10", "V10+", "V11", "V11+", "V12", "V12+", "V13", "V13+",
-    "V14", "V14+", "V15", "V15+", "V16", "V16+", "V17",
+    "V14", "V14+", "V15", "V15+", "V16", "V16+", "V17", "V17+",
 ]
 _FULL_IDX = {g: i for i, g in enumerate(_FULL)}
 
@@ -388,22 +388,50 @@ class Storage:
         Note: half-steps flattened by the old parser are gone from the
         display too, so a route archived as V4+ back then stays V4 here.
         Only routes captioned after this migration carry the plus.
+
+        The whole thing runs inside one BEGIN IMMEDIATE, and the version
+        stamp is re-read *after* that write lock is held. Reading the stamp
+        first and writing second would let two processes both decide to
+        migrate -- and the bot and the API each build a Storage at import,
+        so a deploy that restarts both services starts exactly that race.
+        Recomputing routes and ticks twice is harmless (they derive from the
+        display grade), but the subscription remap feeds a bare index back
+        through the legacy scale, so a second pass silently moves every
+        climber's alert threshold.
         """
+        prev_isolation = conn.isolation_level
+        conn.isolation_level = None  # take manual control of the transaction
+        try:
+            if conn.in_transaction:
+                conn.execute("COMMIT")
+            conn.execute("BEGIN IMMEDIATE")  # waits out the other process
+            try:
+                self._run_grade_scale_migration(conn)
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+        finally:
+            conn.isolation_level = prev_isolation
+
+    def _run_grade_scale_migration(self, conn):
+        """The migration body. Runs with the write lock already held."""
         if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
-            return
-        for row in conn.execute("SELECT id, grade FROM routes").fetchall():
-            conn.execute(
-                "UPDATE routes SET grade_low=? WHERE id=?",
-                (_grade_low_from_display(row["grade"]), row["id"]),
-            )
-        for row in conn.execute(
-            "SELECT id, suggested_grade FROM ticks "
-            "WHERE suggested_grade IS NOT NULL"
-        ).fetchall():
-            conn.execute(
-                "UPDATE ticks SET suggested_grade_low=? WHERE id=?",
-                (_grade_low_from_free_text(row["suggested_grade"]), row["id"]),
-            )
+            return  # another process got here first
+        # one statement per distinct grade rather than per row, so a large
+        # archive does not hold the write lock for thousands of round trips
+        conn.executemany(
+            "UPDATE routes SET grade_low=? WHERE grade=?",
+            [(_grade_low_from_display(r["grade"]), r["grade"])
+             for r in conn.execute("SELECT DISTINCT grade FROM routes").fetchall()],
+        )
+        conn.executemany(
+            "UPDATE ticks SET suggested_grade_low=? WHERE suggested_grade=?",
+            [(_grade_low_from_free_text(r["suggested_grade"]), r["suggested_grade"])
+             for r in conn.execute(
+                 "SELECT DISTINCT suggested_grade FROM ticks "
+                 "WHERE suggested_grade IS NOT NULL").fetchall()],
+        )
         for row in conn.execute(
             "SELECT id, min_grade_low FROM subscriptions "
             "WHERE min_grade_low IS NOT NULL"
@@ -717,14 +745,20 @@ class Storage:
                 "consensus_grade": consensus_grade, "consensus_count": consensus_count}
 
     def set_tick_grade(self, route_id, tg_user_id, suggested_grade):
-        """Update the suggested grade on an existing tick."""
+        """Update the suggested grade on an existing tick.
+
+        Returns True when a tick was actually updated. A caller who has not
+        ticked the route matches no row, and the caller needs to know that
+        rather than be told the suggestion landed.
+        """
         cleaned = _clean_free(suggested_grade) if suggested_grade else None
         with self._lock, self._connect() as conn:
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE ticks SET suggested_grade=?, suggested_grade_low=?, "
                 "updated_at=datetime('now') WHERE route_id=? AND tg_user_id=?",
                 (cleaned, _grade_low_from_free_text(cleaned), route_id, tg_user_id),
             )
+            return cur.rowcount > 0
 
     def _tick_count(self, route_id):
         with self._lock, self._connect() as conn:

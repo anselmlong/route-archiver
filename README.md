@@ -81,6 +81,12 @@ inside one.
 every stored index means. `Storage._migrate_grade_scale()` re-indexes routes
 and tick suggestions from the display grade they were stored with, remaps
 subscription thresholds, and stamps `PRAGMA user_version` so it runs once.
+It does all of that inside one `BEGIN IMMEDIATE` and re-reads the stamp only
+after that write lock is held: the bot and the API each build a `Storage` at
+import, so restarting both services races two migrations on one DB. Routes
+and ticks recompute from their display grade and survive a second pass, but
+the subscription remap feeds a bare index back through the legacy scale, so
+without the lock a deploy would silently move every `/notify` threshold.
 Half-steps flattened by the older parser are gone from the display too, so a
 route archived as `V4+` back then stays `V4`; only routes captioned since
 carry the plus.
