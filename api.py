@@ -30,6 +30,11 @@ ADMINS = {int(x) for x in os.environ.get("ADMIN_IDS", "495290408").split(",") if
 # (so ratings/ticks are scoped to real Telegram users, one per person per route).
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
+# Public t.me deep link that opens the Mini App; same default as bot.py's
+# MINI_APP_LINK. Served via /api/meta so the client can build share links
+# without hardcoding the bot's address.
+MINI_APP_LINK = os.environ.get("MINI_APP_LINK", "https://t.me/nuscc_routes_bot/USC_ROUTES")
+
 app = FastAPI(title="USC Routes")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
@@ -306,6 +311,7 @@ def meta():
         "count": stats["total"],
         "active_count": stats["active"],
         "retired_count": stats["retired"],
+        "mini_app_link": MINI_APP_LINK,
     }
 
 

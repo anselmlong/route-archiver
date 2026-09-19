@@ -277,6 +277,13 @@
     background:transparent;border-radius:var(--r);padding:7px 12px;font-size:12.5px;
     text-decoration:none;transition:background .12s}
   .admindel:hover{background:rgba(248,113,113,.10)}
+  .sharebtn{margin-left:10px;border:1px solid var(--line);background:transparent;
+    border-radius:var(--r);padding:7px 12px;font-size:12.5px;text-decoration:none;
+    transition:background .12s,border-color .12s}
+  .sharebtn:hover,.sharebtn.on{border-color:var(--line-2)}
+  .sharebtn.on{color:var(--accent)}
+  .card.flash{animation:cardflash 1.6s ease}
+  @keyframes cardflash{0%{background:var(--panel-2)}100%{background:transparent}}
 
   @media (prefers-reduced-motion:reduce){
     *,*::before,*::after{animation:none!important;transition:none!important}
@@ -400,7 +407,8 @@
 <script>
 const $=s=>document.querySelector(s);
 const state={routes:[],sort:"hard",wall:"",search:"",min:0,max:1,grades:[],cur:null,initData:"",
-  view:"browse",curList:[],mine:null,board:null,hot:null,setter:null,isAdmin:false,hello:""};
+  view:"browse",curList:[],mine:null,board:null,hot:null,setter:null,isAdmin:false,hello:"",
+  autoOpen:null,miniAppLink:""};
 
 // each view gets its own caption, so the header stops telling people to tap a
 // card on the two views that have none
@@ -417,8 +425,12 @@ function setSub(){
     window.Telegram.WebApp.ready();
     window.Telegram.WebApp.expand();
     if(window.Telegram.WebApp.initData) state.initData=window.Telegram.WebApp.initData;
-    const u=window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user;
+    const glob=window.Telegram.WebApp.initDataUnsafe||{};
+    const u=glob.user;
     if(u&&u.first_name){state.hello="hey "+u.first_name;setSub()}
+    // a shared route link lands here as ?startapp=r<id>; stash it so load()
+    // can jump straight to that route once the collection is fetched
+    if(typeof glob.start_param==="string")state.autoOpen=glob.start_param;
     const bb=window.Telegram.WebApp.BackButton;
     if(bb&&bb.onClick)try{bb.onClick(onBack)}catch(e){}
     // learn whether the caller is an admin (drives the Delete route button)
@@ -438,6 +450,7 @@ async function load(){
     const k=await fetch("/api/meta").then(x=>x.json());
     if(!r||!Array.isArray(r.routes)||!k||!Array.isArray(k.grades))throw new Error("bad payload");
     state.routes=r.routes; state.grades=k.grades;
+    state.miniAppLink=k.mini_app_link||"";
     const n=Math.max(0,state.grades.length-1);
     state.min=0; state.max=n;
     $("#min").min=0; $("#min").max=n; $("#min").value=0;
@@ -446,6 +459,7 @@ async function load(){
     updateRangeUI();
     setSub();
     paint();
+    jumpToSharedRoute();
   }catch(e){
     setSub();
     // leaving the previous cards up invites taps on a list that is gone
@@ -462,6 +476,39 @@ function setWallOptions(walls){
   const sel=$("#wall");
   sel.innerHTML='<option value="">All walls</option>'+
     walls.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join("");
+}
+
+/* ---- route sharing ---- */
+async function shareRoute(btn, id){
+  // build a t.me deep link that reopens the Mini App straight to this route
+  // via ?startapp=r<id> (the app reads it back as initDataUnsafe.start_param)
+  const base=(state.miniAppLink||"").split("?")[0];
+  const link=`${base}?startapp=r${id}`;
+  try{
+    await navigator.clipboard.writeText(link);
+    btn.textContent="✓ link copied";
+    btn.classList.add("on");
+    clearTimeout(btn._t);
+    btn._t=setTimeout(()=>{btn.textContent="↗ Share";btn.classList.remove("on")},2000);
+  }catch(e){
+    window.prompt("Copy the route link:", link);
+  }
+}
+
+function jumpToSharedRoute(){
+  // A shared link arrives with start_param "r<id>". Open that route once its
+  // data is in hand; do it once so an in-app reload doesn't re-trigger it.
+  const m=typeof state.autoOpen==="string"&&state.autoOpen.match(/^r(\d+)$/);
+  state.autoOpen=null;
+  if(!m)return;
+  const route=(state.routes||[]).find(r=>String(r.id)===m[1]);
+  if(route){
+    state.search=""; // ensure it isn't filtered out of the visible list
+    openRoute(route);
+    // nudge the card into view + flash it so the recipient sees what opened
+    const cards=document.querySelectorAll(".card");
+    for(const c of cards){ if(c.dataset.id===String(route.id)){ c.scrollIntoView({block:"center"}); c.classList.add("flash"); } }
+  }
 }
 
 function gn(i){return state.grades[i]||""}
@@ -907,6 +954,11 @@ function refreshSheet(){
     dbtn.onclick=()=>deleteRoute(r.id);
     foot.appendChild(dbtn);
   }
+  const sh=document.createElement("button");
+  sh.className="setterlink sharebtn";
+  sh.textContent="↗ Share";
+  sh.onclick=()=>shareRoute(sh,r.id);
+  foot.appendChild(sh);
 }
 
 async function deleteRoute(routeId){

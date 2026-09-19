@@ -573,7 +573,7 @@ def test_clicking_setter_name_opens_their_profile(setter_live_server):
 
         pg.locator(".card", has_text="Crimpy Wall").click()
         pg.wait_for_selector(".scrim.open")
-        pg.locator(".setterlink").click()
+        pg.locator(".setterlink:not(.sharebtn)").click()
         # #setterStats is unhidden synchronously with a "loading…"
         # placeholder; .mrow only appears once the profile has loaded
         pg.wait_for_selector("#setterStats .mrow")
@@ -600,7 +600,7 @@ def test_setter_profile_back_button_returns_to_browse(setter_live_server):
 
         pg.locator(".card", has_text="Crimpy Wall").click()
         pg.wait_for_selector(".scrim.open")
-        pg.locator(".setterlink").click()
+        pg.locator(".setterlink:not(.sharebtn)").click()
         pg.wait_for_selector("#setterStats:not([hidden])")
 
         pg.locator("#setterBack").click()
@@ -1078,6 +1078,45 @@ def test_suggested_grade_dropdown_is_grounded_around_the_route(authed_page):
     # grounded default = the route's own grade (pre-selected when no
     # climber suggestion overrides it)
     assert authed_page.locator("#stckgrade").input_value() == "V4"
+
+
+# --------------------------------------------------------------------------- #
+# route sharing
+# --------------------------------------------------------------------------- #
+def test_share_button_copies_a_deep_link(live_server):
+    """The Share button copies t.me/USC_ROUTES?startapp=r<id> to the
+    clipboard, and the button flips to a brief 'copied' confirmation."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.context.grant_permissions(["clipboard-read", "clipboard-write"])
+        pg.goto(live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        pg.locator(".card", has_text="Crack Line").click()
+        pg.wait_for_selector(".scrim.open")
+        rid = live_server["route1"]["id"]
+        pg.locator("button.sharebtn").click()
+        pg.wait_for_function("document.querySelector('button.sharebtn').textContent.includes('copied')")
+        link = pg.evaluate("navigator.clipboard.readText()")
+        assert link == f"https://t.me/nuscc_routes_bot/USC_ROUTES?startapp=r{rid}", link
+        browser.close()
+
+
+def test_shared_link_jumps_straight_to_the_route(live_server):
+    """A receiver tapping a share link lands with start_param=r<id>; the app
+    opens that route's sheet and flashes its card instead of the wall."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        rid = live_server["route1"]["id"]
+        # simulate the startapp param Telegram delivers on a shared deep link
+        pg.evaluate(f"state.autoOpen = 'r{rid}'")
+        pg.evaluate("jumpToSharedRoute()")
+        pg.wait_for_selector(".scrim.open")
+        assert pg.locator("#sname").inner_text() == "Crack Line"
+        browser.close()
 
 
 # --------------------------------------------------------------------------- #
