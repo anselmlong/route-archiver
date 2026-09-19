@@ -286,6 +286,18 @@ def test_tick_grade_updates_existing_tick(client, api_module):
                         "consensus_grade": "V6", "consensus_count": 1}
 
 
+def test_tick_grade_rejected_when_the_caller_has_not_ticked(client, api_module):
+    """Without a tick there is no row to hang the suggestion on. Reporting
+    success would show a confirmation plus a consensus computed without the
+    caller, and a reload would quietly undo both."""
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=5)
+    r = client.put(f"/api/tick/{route['id']}/grade",
+                    json={"suggested_grade": "V6", "init_data": raw})
+    assert r.status_code == 409
+    assert "tick this route" in r.json()["error"]
+
+
 def test_tick_grade_requires_auth(client, api_module):
     route = _seed_route(api_module)
     r = client.put(f"/api/tick/{route['id']}/grade", json={"suggested_grade": "V6"})

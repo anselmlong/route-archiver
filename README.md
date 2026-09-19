@@ -19,7 +19,9 @@ they just keep posting route pics.
   sorted by hardest, easiest, newest, top rated or most sent, and filtered
   by a grade range and wall section; tap a route for the full photo +
   setter name, and leave via the ✕, the Telegram back button or the
-  backdrop.
+  backdrop. The photo is shown whole rather than cropped, and tapping it
+  opens it full screen with its own ✕, where it can be pinched, panned or
+  double-tapped to zoom in on a single hold.
 - **Admin CRUD** — admins can edit/delete routes from the inline buttons on the
   archived confirmation, or `/routes` to list them.
 - **Route lifecycle** — spray wall routes get physically stripped and re-set,
@@ -81,6 +83,12 @@ inside one.
 every stored index means. `Storage._migrate_grade_scale()` re-indexes routes
 and tick suggestions from the display grade they were stored with, remaps
 subscription thresholds, and stamps `PRAGMA user_version` so it runs once.
+It does all of that inside one `BEGIN IMMEDIATE` and re-reads the stamp only
+after that write lock is held: the bot and the API each build a `Storage` at
+import, so restarting both services races two migrations on one DB. Routes
+and ticks recompute from their display grade and survive a second pass, but
+the subscription remap feeds a bare index back through the legacy scale, so
+without the lock a deploy would silently move every `/notify` threshold.
 Half-steps flattened by the older parser are gone from the display too, so a
 route archived as `V4+` back then stays `V4`; only routes captioned since
 carry the plus.

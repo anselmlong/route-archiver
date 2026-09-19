@@ -168,9 +168,46 @@
   .sheet .wrap{max-width:720px;margin:0 auto;padding:0}
   /* a fixed photo band keeps the route name above the fold whatever the
      aspect ratio of the shot, and leaves a neutral tile if it fails to load */
-  .shot{position:relative;height:38vh;min-height:180px;background:var(--panel-2);
-    border-radius:var(--r-xl) var(--r-xl) 0 0;overflow:hidden}
-  .shot img{width:100%;height:100%;object-fit:cover;display:block}
+  /* a route photo is the point of the route, so it is never cropped: the
+     band takes its height from the shot itself, capped so the name stays
+     above the fold, and a tap opens it full screen */
+  .shot{position:relative;min-height:170px;background:var(--panel-2);
+    border-radius:var(--r-xl) var(--r-xl) 0 0;overflow:hidden;cursor:zoom-in}
+  .shot img{display:block;width:100%;max-height:54vh;object-fit:contain}
+  /* no photo on this route: a neutral tile, and none of the enlarge cues */
+  .shot.nophoto{cursor:default}
+  .shot.nophoto img,.shot.nophoto .zoomhint{display:none}
+  .shot.nophoto::after{content:"No photo";position:absolute;inset:0;display:flex;
+    align-items:center;justify-content:center;color:var(--faint);font-size:12.5px}
+  .zoomhint{position:absolute;right:12px;bottom:12px;display:flex;align-items:center;
+    gap:6px;padding:6px 10px;border-radius:999px;font-size:11.5px;color:#fff;
+    background:rgba(10,12,16,.62);border:1px solid rgba(255,255,255,.14);
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);pointer-events:none}
+  .zoomhint svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round}
+
+  /* full-screen photo, above the sheet */
+  .lightbox{position:fixed;inset:0;z-index:40;display:none;background:#05070a;
+    align-items:center;justify-content:center;overflow:hidden;touch-action:none}
+  .lightbox.open{display:flex;animation:fade .14s ease}
+  .lightbox img{max-width:100%;max-height:100%;object-fit:contain;display:block;
+    transform-origin:center center;cursor:zoom-in;-webkit-user-select:none;user-select:none;
+    -webkit-user-drag:none}
+  .lightbox.zoomed img{cursor:grab}
+  .lightbox.panning img{cursor:grabbing}
+  .zoomlevel{position:fixed;z-index:41;left:50%;transform:translateX(-50%);
+    bottom:max(18px,env(safe-area-inset-bottom));padding:6px 12px;border-radius:999px;
+    font-size:12px;font-variant-numeric:tabular-nums;color:#fff;pointer-events:none;
+    background:rgba(10,12,16,.7);border:1px solid rgba(255,255,255,.14);
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+    opacity:0;transition:opacity .18s}
+  .lightbox.zoomed .zoomlevel{opacity:1}
+  .lbclose{position:fixed;z-index:41;top:max(14px,env(safe-area-inset-top));right:14px;
+    width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.18);
+    background:rgba(10,12,16,.7);color:#fff;font-size:17px;line-height:1;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  .lbclose:hover{background:rgba(10,12,16,.92)}
   /* a zero-height sticky bar pins the exit to the top of the sheet, so it is
      still there once a long route has been scrolled past its photo */
   .sheetbar{position:sticky;top:0;z-index:3;height:0;display:flex;
@@ -304,12 +341,19 @@
   <button data-view="hot"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.8 2.5c.6 3-1.2 4.4-2.6 5.8C8.5 10 6.8 12 6.8 14.7a5.2 5.2 0 0 0 10.4 0c0-1.8-.8-3.4-1.9-4.7-.3 1.1-.9 1.9-1.8 2.4.6-3.6-.3-7.6-.7-9.9z"/><path d="M12 20.4a2.3 2.3 0 0 0 2.3-2.3c0-1.7-2.3-3.5-2.3-3.5s-2.3 1.8-2.3 3.5a2.3 2.3 0 0 0 2.3 2.3z"/></svg>Hot</button>
 </nav>
 
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Route photo">
+  <button class="lbclose" id="lbclose" aria-label="Close photo">&#10005;</button>
+  <img id="lbimg" alt="Route photo">
+  <span class="zoomlevel" id="zoomlevel">1.0&times;</span>
+</div>
+
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet">
   <div class="wrap">
     <div class="sheetbar"><button class="sheetclose" id="sheetclose" aria-label="Close route">&#10005;</button></div>
-    <div class="shot">
-      <img id="simg" alt="">
+    <div class="shot" id="shot" role="button" tabindex="0" aria-label="View photo full screen">
+      <img id="simg" alt="" onerror="markNoPhoto()">
+      <span class="zoomhint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/></svg>Tap to enlarge</span>
     </div>
     <div class="sbody">
       <h2 id="sname"></h2>
@@ -376,7 +420,7 @@ function setSub(){
     const u=window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user;
     if(u&&u.first_name){state.hello="hey "+u.first_name;setSub()}
     const bb=window.Telegram.WebApp.BackButton;
-    if(bb&&bb.onClick)try{bb.onClick(closeSheet)}catch(e){}
+    if(bb&&bb.onClick)try{bb.onClick(onBack)}catch(e){}
     // learn whether the caller is an admin (drives the Delete route button)
     if(state.initData){
       fetch("/api/me?tg="+encodeURIComponent(state.initData))
@@ -392,6 +436,7 @@ async function load(){
     const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
     const r=await fetch("/api/routes"+q).then(x=>x.json());
     const k=await fetch("/api/meta").then(x=>x.json());
+    if(!r||!Array.isArray(r.routes)||!k||!Array.isArray(k.grades))throw new Error("bad payload");
     state.routes=r.routes; state.grades=k.grades;
     const n=Math.max(0,state.grades.length-1);
     state.min=0; state.max=n;
@@ -403,6 +448,9 @@ async function load(){
     paint();
   }catch(e){
     setSub();
+    // leaving the previous cards up invites taps on a list that is gone
+    $("#grid").innerHTML="";
+    state.curList=[];
     const empty=$("#empty");
     empty.hidden=false;
     empty.innerHTML='Couldn\'t load routes. <a href="#" id="retry" style="color:var(--accent)">Retry</a>';
@@ -412,7 +460,8 @@ async function load(){
 
 function setWallOptions(walls){
   const sel=$("#wall");
-  sel.innerHTML='<option value="">All walls</option>'+walls.map(w=>`<option value="${w}">${w}</option>`).join("");
+  sel.innerHTML='<option value="">All walls</option>'+
+    walls.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join("");
 }
 
 function gn(i){return state.grades[i]||""}
@@ -436,6 +485,12 @@ function sortList(l){
     case "ticks":  return c.sort((a,b)=>(b.tick_count||0)-(a.tick_count||0)||byNew(a,b));
     default:       return c.sort((a,b)=>key(b,false)-key(a,false)||byNew(a,b));
   }
+}
+
+function flashFor(id,el,msg,bad){
+  // a response that lands after the user moved on must not report anything
+  // into the route that happens to be open now -- success or failure
+  if(state.cur&&state.cur.id===id)flash(el,msg,bad);
 }
 
 function flash(el,msg,bad){
@@ -484,10 +539,13 @@ function findRoutes(id){
   // state.hot.routes (this week's hot list) and state.setter.routes (a
   // setter's profile) -- return every copy so a rating/tick updates
   // whichever one is actually on screen
-  const out=state.routes.filter(x=>x.id===id);
-  if(state.mine)out.push(...state.mine.routes.filter(x=>x.id===id));
-  if(state.hot)out.push(...state.hot.routes.filter(x=>x.id===id));
-  if(state.setter)out.push(...state.setter.routes.filter(x=>x.id===id));
+  // an error body (a 404 {detail} or a 401 {error}) carries no routes, so
+  // every collection is shape-checked before it is walked -- including
+  // state itself, whose routes a failed reload can leave undefined
+  const out=[];
+  for(const c of [state,state.mine,state.hot,state.setter]){
+    if(c&&Array.isArray(c.routes))out.push(...c.routes.filter(x=>x.id===id));
+  }
   return out;
 }
 
@@ -521,7 +579,7 @@ function renderGrid(list){
   grid.querySelectorAll(".card").forEach(c=>{
     const r=list.find(x=>x.id===Number(c.dataset.id));
     c.querySelector(".nm").textContent=r.name;
-    c.onclick=e=>{if(e.target.closest("button"))return;open(r)};
+    c.onclick=e=>{if(e.target.closest("button"))return;openRoute(r)};
   });
 }
 
@@ -537,11 +595,18 @@ function updateRangeUI(){
   const pL=(state.min/n)*100, pR=100-(state.max/n)*100;
   $("#dFill").style.left=pL+"%";
   $("#dFill").style.width=(100-pL-pR)+"%";
+  // the two inputs overlap, so whichever is painted on top wins the touch.
+  // Once min reaches the top of the scale, max has nowhere left to go and
+  // the range would be stuck shut, so hand the grab to min instead.
+  const atTop=state.min>=n;
+  $("#min").style.zIndex=atTop?3:1;
+  $("#max").style.zIndex=atTop?1:2;
 }
 
 /* ---- view switching: Browse / Mine / Leaderboard ---- */
 function setView(v){
   if(v===state.view)return;
+  closePhoto();  // never leave a full-screen photo hanging over another view
   state.view=v;
   setSub();
   $("#viewseg").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
@@ -576,7 +641,9 @@ async function loadMine(){
   }
   $("#sub").textContent="loading your ticks…";
   try{
-    state.mine=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
+    const d=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
+    if(!d||!Array.isArray(d.routes))throw new Error(d&&d.error||"no history");
+    state.mine=d;
     setSub();
     renderMine();
   }catch(e){
@@ -651,7 +718,8 @@ async function openSetter(setterId){
   try{
     let q="/api/setter/"+setterId;
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
-    state.setter=await fetch(q).then(x=>x.json());
+    const d=await fetch(q).then(x=>x.json());
+    state.setter=(d&&Array.isArray(d.routes))?d:null;
     setSub();
     renderSetter();
   }catch(e){
@@ -662,9 +730,8 @@ async function openSetter(setterId){
 
 function renderSetter(){
   const p=state.setter;
-  if(!p)return;
-  if(p.detail){
-    // FastAPI's default 404 body ({"detail": "..."}) -- setter not found
+  if(!p){
+    // the fetch came back without a profile -- setter not found
     $("#setterStats").innerHTML='<div class="empty">Setter not found.</div>'+
       '<button class="backbtn" id="setterBack">← Back to Browse</button>';
     $("#setterBack").onclick=()=>setView("browse");
@@ -718,33 +785,39 @@ function renderBoard(){
 /* ---- sheet buttons ---- */
 async function rate(id,val){
   if(!state.initData){alert("Open via Telegram to rate (one rating per account).");return}
-  const slot=$("#ratesaved");
+  const slot=$("#ratesaved"), view=state.view;
   try{
     const res=await fetch(`/api/rate/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
-    if(!res.ok){flash(slot,d.error||"Couldn't save",true);return}
+    if(!res.ok){flashFor(id,slot,d.error||"Couldn't save",true);return}
     if(d.avg!==undefined)findRoutes(id).forEach(r=>{r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating});
-    renderGrid(state.curList);
-    if(state.cur&&state.cur.id===id)refreshSheet();
-    flash(slot,d.my_rating?"✓ rating saved":"✓ rating cleared");
-  }catch(e){flash(slot,"Couldn't save — check connection",true)}
+    if(state.view===view)renderGrid(state.curList);
+    if(state.cur&&state.cur.id===id){
+      refreshSheet();
+      flash(slot,d.my_rating?"✓ rating saved":"✓ rating cleared");
+    }
+  }catch(e){flashFor(id,slot,"Couldn't save — check connection",true)}
 }
 
 async function tick(id,val){
   if(!state.initData){alert("Open via Telegram to tick (ticklist is per account).");return}
+  const view=state.view;
   try{
     const res=await fetch(`/api/tick/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
-    const d=await res.json();
+    const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
-    if(!res.ok){flash($("#gradesaved"),d.error||"Couldn't save",true);return}
+    if(!res.ok){flashFor(id,$("#gradesaved"),d.error||"Couldn't save",true);return}
     if(d.ticked!==undefined)findRoutes(id).forEach(r=>{
       r.my_tick=d.ticked?1:0;r.tick_count=d.count;
+      // un-ticking drops the suggestion server-side and re-ticking starts
+      // without one, so mirror that instead of leaving the old value showing
+      r.my_suggested_grade=d.suggested_grade||null;
       r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
     });
-    renderGrid(state.curList);
+    if(state.view===view)renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
-  }catch(e){flash($("#gradesaved"),"Couldn\'t save — check connection",true)}
+  }catch(e){flashFor(id,$("#gradesaved"),"Couldn\'t save — check connection",true)}
 }
 
 async function setTickGrade(id){
@@ -754,16 +827,15 @@ async function setTickGrade(id){
   try{
     const res=await fetch(`/api/tick/${id}/grade`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggested_grade:g,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
-    if(!res.ok){flash(slot,d.error||"Couldn\'t save that grade",true);return}
+    if(!res.ok){flashFor(id,slot,d.error||"Couldn\'t save that grade",true);return}
     // fold the fresh consensus straight back in, so the community-grade line
     // above reflects this suggestion without waiting for a reload
     findRoutes(id).forEach(r=>{
       r.my_suggested_grade=g;
       r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
     });
-    if(state.cur&&state.cur.id===id)refreshSheet();
-    flash(slot,"✓ grade saved");
-  }catch(e){flash(slot,"Couldn\'t save — check connection",true)}
+    if(state.cur&&state.cur.id===id){refreshSheet();flash(slot,"✓ grade saved")}
+  }catch(e){flashFor(id,slot,"Couldn\'t save — check connection",true)}
 }
 
 /* ---- sheet open/refresh ---- */
@@ -823,7 +895,7 @@ async function deleteRoute(routeId){
   if(!confirm("Delete this route? This hides it from the wall and everyone's view (ratings/ticks kept)."))return;
   try{
     const res=await fetch(`/api/routes/${routeId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
-    const d=await res.json();
+    const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
     if(res.status===403){alert("Admins only.");return}
     if(!res.ok){alert(d.error||"Couldn't delete that route.");return}
@@ -832,6 +904,166 @@ async function deleteRoute(routeId){
     alert("Route deleted.");
   }catch(e){alert("Couldn't delete the route. Check your connection and try again.")}
 }
+function photoOpen(){return $("#lightbox").classList.contains("open")}
+
+function markNoPhoto(){
+  // /api/photo 404s for a route archived without one; without this the band
+  // would still offer "tap to enlarge" and open a full-screen black rectangle
+  $("#shot").classList.add("nophoto");
+  $("#shot").removeAttribute("tabindex");
+  $("#shot").removeAttribute("role");
+}
+
+// everything behind the photo is made inert, so Tab cannot walk onto controls
+// hidden under it -- one blind Tab+Enter used to un-tick the route
+const BEHIND=["header",".wrap#main","#viewseg","#scrim","#sheet"];
+function setBehindInert(on){
+  for(const sel of BEHIND){
+    const el=document.querySelector(sel);
+    if(!el)continue;
+    if(on)el.setAttribute("inert","");
+    else el.removeAttribute("inert");
+  }
+}
+
+/* ---- full-screen photo: pinch, pan, double-tap zoom ---- */
+const ZOOM_MIN=1, ZOOM_MAX=6, ZOOM_STEP=2.5;
+const zoom={scale:1,x:0,y:0,pointers:new Map(),baseDist:0,baseScale:1,
+  panFrom:null,moved:false,lastTap:0,onImage:false};
+
+function applyZoom(){
+  const img=$("#lbimg"), box=$("#lightbox");
+  // the photo is letterboxed, so pan is bounded by how far it actually
+  // overflows the screen at this scale -- you can never drag it off-view
+  const ow=img.offsetWidth*zoom.scale, oh=img.offsetHeight*zoom.scale;
+  const maxX=Math.max(0,(ow-box.clientWidth)/2);
+  const maxY=Math.max(0,(oh-box.clientHeight)/2);
+  zoom.x=Math.min(maxX,Math.max(-maxX,zoom.x));
+  zoom.y=Math.min(maxY,Math.max(-maxY,zoom.y));
+  img.style.transform=`translate(${zoom.x}px,${zoom.y}px) scale(${zoom.scale})`;
+  box.classList.toggle("zoomed",zoom.scale>1.01);
+  $("#zoomlevel").textContent=zoom.scale.toFixed(1)+"\u00d7";
+}
+
+function resetZoom(){
+  zoom.scale=1;zoom.x=0;zoom.y=0;zoom.pointers.clear();
+  zoom.panFrom=null;zoom.moved=false;
+  $("#lightbox").classList.remove("panning");
+  applyZoom();
+}
+
+function zoomTo(next,cx,cy){
+  // keep whatever is under the fingers (or the cursor) pinned in place
+  const box=$("#lightbox").getBoundingClientRect();
+  const px=(cx===undefined?box.width/2:cx-box.left)-box.width/2;
+  const py=(cy===undefined?box.height/2:cy-box.top)-box.height/2;
+  const clamped=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,next));
+  const ratio=clamped/zoom.scale;
+  zoom.x=px-(px-zoom.x)*ratio;
+  zoom.y=py-(py-zoom.y)*ratio;
+  zoom.scale=clamped;
+  if(clamped<=ZOOM_MIN){zoom.x=0;zoom.y=0}
+  applyZoom();
+}
+
+function pointerMid(){
+  const pts=[...zoom.pointers.values()];
+  return {x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2,
+          d:Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y)};
+}
+
+function onPhotoDown(e){
+  if(e.target.closest(".lbclose"))return;
+  // record this before capturing: a captured pointer retargets its later
+  // events to the capturing element, so e.target at pointerup always reads
+  // as the lightbox even when the finger went down on the photo
+  if(zoom.pointers.size===0)zoom.onImage=!!e.target.closest("#lbimg");
+  zoom.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  zoom.moved=false;
+  if(zoom.pointers.size===2){
+    const m=pointerMid();
+    zoom.baseDist=m.d||1;
+    zoom.baseScale=zoom.scale;
+    zoom.panFrom=null;
+  }else if(zoom.pointers.size===1&&zoom.scale>1){
+    zoom.panFrom={x:e.clientX,y:e.clientY,ox:zoom.x,oy:zoom.y};
+    $("#lightbox").classList.add("panning");
+  }
+  try{e.currentTarget.setPointerCapture(e.pointerId)}catch(err){}
+}
+
+function onPhotoMove(e){
+  if(!zoom.pointers.has(e.pointerId))return;
+  zoom.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(zoom.pointers.size>=2){
+    const m=pointerMid();
+    zoomTo(zoom.baseScale*(m.d/zoom.baseDist), m.x, m.y);
+    zoom.moved=true;
+  }else if(zoom.panFrom){
+    zoom.x=zoom.panFrom.ox+(e.clientX-zoom.panFrom.x);
+    zoom.y=zoom.panFrom.oy+(e.clientY-zoom.panFrom.y);
+    if(Math.hypot(e.clientX-zoom.panFrom.x,e.clientY-zoom.panFrom.y)>8)zoom.moved=true;
+    applyZoom();
+  }
+}
+
+function onPhotoUp(e){
+  const wasPinching=zoom.pointers.size>=2;
+  zoom.pointers.delete(e.pointerId);
+  if(zoom.pointers.size<2){zoom.baseScale=zoom.scale}
+  if(zoom.pointers.size===0){
+    zoom.panFrom=null;
+    $("#lightbox").classList.remove("panning");
+    // a pinch or a pan is not half of a double tap: without this, a tap, a
+    // pinch and a tap in quick succession read as one
+    if(zoom.moved||wasPinching)zoom.lastTap=0;
+    if(!zoom.moved&&!wasPinching&&!e.target.closest(".lbclose")){
+      const now=Date.now();
+      if(now-zoom.lastTap<300){
+        // double tap toggles between fit and a close-up on that spot
+        zoomTo(zoom.scale>1.01?ZOOM_MIN:ZOOM_STEP, e.clientX, e.clientY);
+        zoom.lastTap=0;
+      }else{
+        zoom.lastTap=now;
+        // a tap on the letterbox, never on the photo itself, dismisses
+        if(!zoom.onImage&&zoom.scale<=1.01)closePhoto();
+      }
+    }
+  }
+}
+
+function onPhotoWheel(e){
+  e.preventDefault();
+  zoomTo(zoom.scale*(e.deltaY<0?1.15:1/1.15), e.clientX, e.clientY);
+}
+
+function openPhoto(){
+  const img=$("#simg");
+  if(!state.cur||$("#shot").classList.contains("nophoto"))return;
+  if(!img.getAttribute("src")||!img.naturalWidth)return;
+  $("#lbimg").src=img.src;
+  resetZoom();  // never inherit the last photo's zoom
+  $("#lightbox").classList.add("open");
+  setBehindInert(true);
+  $("#lbclose").focus();
+  tgBack(true);
+}
+
+function closePhoto(){
+  if(!photoOpen())return;
+  $("#lightbox").classList.remove("open");
+  $("#lbimg").removeAttribute("src");
+  resetZoom();
+  setBehindInert(false);
+  const shot=$("#shot");
+  if(shot.hasAttribute("tabindex"))shot.focus();
+  // the sheet is still underneath, so the native back button stays on for it
+  tgBack($("#sheet").classList.contains("open"));
+}
+
+// the native back button unwinds one layer at a time, photo before sheet
+function onBack(){photoOpen()?closePhoto():closeSheet()}
+
 function tgBack(show){
   // Telegram's native back button is the exit people reach for first inside
   // a mini-app; it is a no-op in a plain browser, where the ✕ carries it
@@ -840,8 +1072,12 @@ function tgBack(show){
   try{show?w.BackButton.show():w.BackButton.hide()}catch(e){}
 }
 
-function open(r){
+function openRoute(r){
   state.cur=r;
+  const shot=$("#shot");
+  shot.classList.remove("nophoto");
+  shot.setAttribute("tabindex","0");
+  shot.setAttribute("role","button");
   $("#simg").src=`/api/photo/${r.id}`;
   $("#ratesaved").hidden=true;
   $("#gradesaved").hidden=true;
@@ -897,9 +1133,10 @@ function renderComments(routeId,comments){
   });
 }
 
-function bumpCommentCount(routeId,delta){
+function bumpCommentCount(routeId,delta,view){
   findRoutes(routeId).forEach(r=>{r.comment_count=Math.max(0,(r.comment_count||0)+delta)});
-  renderGrid(state.curList);
+  // repaint only if the user is still on the view that list belongs to
+  if(view===undefined||state.view===view)renderGrid(state.curList);
 }
 
 async function postComment(routeId){
@@ -907,27 +1144,33 @@ async function postComment(routeId){
   const text=input.value.trim();
   if(!text)return;
   if(!state.initData){alert("Open via Telegram to comment.");return}
+  const view=state.view;
   try{
     const res=await fetch(`/api/comments/${routeId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,init_data:state.initData})});
-    const d=await res.json();
+    const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
     if(!res.ok){alert(d.error||"Couldn't post that comment.");return}
     input.value="";
-    bumpCommentCount(routeId,1);
+    bumpCommentCount(routeId,1,view);
     loadComments(routeId);
   }catch(e){alert("Couldn't post your comment. Check your connection and try again.")}
 }
 
 async function deleteComment(commentId,routeId){
+  const view=state.view;
   try{
-    await fetch(`/api/comments/${commentId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
-    bumpCommentCount(routeId,-1);
+    const res=await fetch(`/api/comments/${commentId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
+    if(!res.ok){alert("Couldn't delete that comment.");return}
+    bumpCommentCount(routeId,-1,view);
     loadComments(routeId);
   }catch(e){alert("Couldn't delete your comment. Check your connection and try again.")}
 }
 function closeSheet(){
+  const el=document.activeElement;
+  if(el&&$("#sheet").contains(el)&&typeof el.blur==="function")el.blur();
   $("#scrim").classList.remove("open");
   $("#sheet").classList.remove("open");
+  closePhoto();  // after the sheet is marked closed, so back turns fully off
   state.cur=null;
   tgBack(false);
 }
@@ -938,15 +1181,61 @@ function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt
 /* ---- wire up ---- */
 $("#scrim").onclick=closeSheet;
 $("#sheetclose").onclick=closeSheet;
-document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
+$("#shot").onclick=openPhoto;
+$("#shot").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openPhoto()}};
+$("#lbclose").onclick=e=>{e.stopPropagation();closePhoto()};
+// the photo is an interactive surface now, so it is no longer a close button:
+// dismissal is the X, Escape, Telegram back, or a tap on the letterbox
+$("#lightbox").addEventListener("pointerdown",onPhotoDown);
+$("#lightbox").addEventListener("pointermove",onPhotoMove);
+$("#lightbox").addEventListener("pointerup",onPhotoUp);
+$("#lightbox").addEventListener("pointercancel",e=>{
+  zoom.pointers.delete(e.pointerId);zoom.panFrom=null;
+  $("#lightbox").classList.remove("panning");
+});
+$("#lightbox").addEventListener("wheel",onPhotoWheel,{passive:false});
+document.addEventListener("keydown",e=>{
+  if(photoOpen()&&e.key!=="Escape"){
+    if(e.key==="+"||e.key==="="){zoomTo(zoom.scale*1.4);e.preventDefault()}
+    else if(e.key==="-"){zoomTo(zoom.scale/1.4);e.preventDefault()}
+    else if(e.key==="0"){resetZoom();e.preventDefault()}
+    return;
+  }
+  if(e.key!=="Escape")return;
+  if(photoOpen()){closePhoto();return}   // unwind the photo before the sheet
+  if(!$("#sheet").classList.contains("open"))return;
+  const el=document.activeElement;
+  if(el&&$("#sheet").contains(el)&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")){
+    el.blur();  // commits a pending grade edit and keeps a comment draft
+    return;
+  }
+  closeSheet();
+});
 $("#viewseg").querySelectorAll("button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
 $("#sort").onchange=e=>{state.sort=e.target.value;paint()};
 $("#wall").onchange=e=>{state.wall=e.target.value;paint()};
 $("#search").oninput=e=>{state.search=e.target.value;paint()};
-$("#min").oninput=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI()};
-$("#min").onchange=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI();paint()};
-$("#max").oninput=e=>{let v=+e.target.value;if(v<state.min)v=state.min;state.max=v;e.target.value=v;updateRangeUI()};
-$("#max").onchange=e=>{let v=+e.target.value;if(v<state.min)v=state.min;state.max=v;e.target.value=v;updateRangeUI();paint()};
+// The thumbs push each other rather than stopping dead. Clamping meant that
+// once the two met, the one painted on top was pinned by the other and the
+// range could not be reopened by dragging -- the list just stayed empty.
+function dragMin(v,repaint){
+  state.min=v;
+  if(state.max<v){state.max=v;$("#max").value=v}
+  $("#min").value=v;
+  updateRangeUI();
+  if(repaint)paint();
+}
+function dragMax(v,repaint){
+  state.max=v;
+  if(state.min>v){state.min=v;$("#min").value=v}
+  $("#max").value=v;
+  updateRangeUI();
+  if(repaint)paint();
+}
+$("#min").oninput=e=>dragMin(+e.target.value,false);
+$("#min").onchange=e=>dragMin(+e.target.value,true);
+$("#max").oninput=e=>dragMax(+e.target.value,false);
+$("#max").onchange=e=>dragMax(+e.target.value,true);
 // star selection
 $("#starselect").onclick=e=>{
   if(!state.cur)return;

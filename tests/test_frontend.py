@@ -885,3 +885,602 @@ def test_close_button_stays_reachable_after_scrolling_the_sheet(page):
     page.locator("#sheetclose").click()
     page.wait_for_selector(".scrim:not(.open)", state="attached")
     assert not page.locator("#sheet").is_visible()
+
+
+# --------------------------------------------------------------------------- #
+# defects found by the correctness review
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def hostile_wall_live_server(tmp_path, monkeypatch):
+    """A wall name carrying an HTML payload. An unrecognised wall is stored
+    verbatim by _norm_wall, and the bot derives walls from forum topic titles,
+    so a crafted topic name reaches every viewer's wall dropdown."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "wall_xss.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+    photo = tmp_path / "route.png"
+    photo.write_bytes(_PNG_1PX)
+    api_mod.storage.add_route(
+        name="Innocent", grade="V4", grade_low=V_ORDER.index("V4"),
+        wall='left"><img src=x onerror="window.__wallxss=1">', photo_path=str(photo))
+
+    base_url, server, thread = _boot_server(api_mod.app)
+    yield {"base_url": base_url}
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+def test_wall_names_are_escaped_in_the_filter_dropdown(hostile_wall_live_server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(hostile_wall_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        assert pg.evaluate("window.__wallxss") is None
+        assert pg.locator("#wall img").count() == 0
+        # the payload survives as inert text in the option label...
+        assert "onerror" in pg.locator("#wall").inner_text()
+        # ...and, the part that actually breaks the feature, the option's
+        # value is the whole wall name rather than truncating at the quote,
+        # so selecting it still filters to that wall
+        values = pg.eval_on_selector_all("#wall option", "els => els.map(e => e.value)")
+        assert '\'left"><img src=x onerror="window.__wallxss=1">\'' .strip("'") in values
+        browser.close()
+
+
+def test_a_missing_setter_profile_does_not_break_later_writes(authed_page):
+    """Regression: openSetter stored the raw response, so a 404 body (which
+    has no routes array) poisoned findRoutes. Every later rating and tick then
+    threw after the server had already stored it, so the sheet reported a
+    connection failure -- and the obvious retry silently undid the write."""
+    authed_page.evaluate("openSetter(99999)")
+    authed_page.wait_for_selector("#setterBack")
+    assert "not found" in authed_page.locator("#setterStats").inner_text().lower()
+    authed_page.locator("#setterBack").click()
+    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.wait_for_selector("#ratesaved:not([hidden])")
+    saved = authed_page.locator("#ratesaved")
+    assert "bad" not in (saved.get_attribute("class") or "")
+    assert "saved" in saved.inner_text()
+
+
+def test_grade_range_can_be_reopened_from_the_top_of_the_scale(page):
+    """Regression: both range inputs overlap, and at the top of the scale the
+    one painted on top was the max thumb, which is clamped by min. Dragging it
+    back did nothing, leaving an empty list with no way out but a reload."""
+    top = len(V_ORDER) - 1
+    _drag(page, "#min", top)
+    assert page.locator(".card").count() == 0
+
+    box = page.locator(".range-wrap").bounding_box()
+    y = box["y"] + box["height"] / 2
+    page.mouse.move(box["x"] + box["width"] - 2, y)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] * 0.3, y, steps=12)
+    page.mouse.up()
+
+    assert page.evaluate("state.min") < top
+    assert page.locator(".card").count() > 0
+
+
+def test_a_late_rating_response_does_not_confirm_on_another_route(authed_page):
+    """Regression: the saved indicator was not gated on the sheet still
+    showing the route that was rated, so a slow response painted a green
+    'rating saved' next to a different route's empty stars."""
+    # hold the rating response open from inside the page, so the ordering is
+    # deterministic -- a sleeping route handler would block the click itself
+    authed_page.evaluate("""
+      window.__release = null;
+      const real = window.fetch;
+      window.fetch = (u, o) => String(u).includes('/api/rate/')
+        ? new Promise(done => { window.__release = () => done(new Response(
+            JSON.stringify({avg: 3, count: 1, my_rating: 3}),
+            {status: 200, headers: {'Content-Type': 'application/json'}})); })
+        : real(u, o);
+    """)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.wait_for_function("window.__release !== null")
+
+    authed_page.keyboard.press("Escape")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+    authed_page.locator(".card", has_text="Weird").click()
+    authed_page.wait_for_selector(".scrim.open")
+
+    authed_page.evaluate("window.__release()")
+    authed_page.wait_for_timeout(250)
+
+    assert authed_page.locator("#ratesaved").is_hidden()
+    assert authed_page.evaluate("state.cur.my_rating") in (None, 0)
+
+
+def _reload_personalised(pg):
+    """The authed fixture sets initData after the first load, so re-fetch to
+    get my_tick / my_suggested_grade attached to the routes."""
+    pg.evaluate("load()")
+    pg.wait_for_function("state.routes.length && state.routes.some(r => r.my_tick)")
+
+
+def test_escape_commits_a_pending_grade_edit(authed_page):
+    """Regression: closeSheet nulled state.cur inside the keydown handler, so
+    the input's change event (which only fires on blur) found nothing to save.
+    The X button saved the edit and Escape silently dropped it."""
+    _reload_personalised(authed_page)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#stckgrade").fill("V7")
+    authed_page.keyboard.press("Escape")   # first leaves the field
+    authed_page.keyboard.press("Escape")   # second closes the sheet
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    assert authed_page.locator("#stckgrade").input_value() == "V7"
+    assert "V7" in authed_page.locator("#sconsensus").inner_text()
+
+
+def test_escape_in_the_comment_box_keeps_the_draft(authed_page):
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#cinput").click()
+    authed_page.locator("#cinput").fill("heel hook the arete")
+    authed_page.keyboard.press("Escape")
+
+    assert authed_page.locator("#sheet").is_visible()
+    assert authed_page.locator("#cinput").input_value() == "heel hook the arete"
+    authed_page.keyboard.press("Escape")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+
+
+def test_re_ticking_clears_the_previous_suggested_grade(authed_page):
+    """Regression: a fresh tick carries no suggestion server-side, but the
+    sheet kept showing the old one, so the climber had no reason to re-enter
+    it and it never rejoined the consensus."""
+    _reload_personalised(authed_page)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    # make the suggestion differ from the setter's own grade, so the fallback
+    # and the stale value are telling apart
+    authed_page.locator("#stckgrade").fill("V7")
+    authed_page.locator("#stckgrade").blur()
+    authed_page.wait_for_function("state.cur.my_suggested_grade === 'V7'")
+
+    authed_page.locator("#stck").click()          # untick
+    authed_page.wait_for_function("state.cur.my_tick === 0")
+    authed_page.locator("#stck").click()          # re-tick
+    authed_page.wait_for_function("state.cur.my_tick === 1")
+
+    assert authed_page.evaluate("state.cur.my_suggested_grade") in (None, "")
+    # falls back to the setter's grade, not the suggestion the server dropped
+    assert authed_page.locator("#stckgrade").input_value() == "V4"
+
+
+# --------------------------------------------------------------------------- #
+# full-screen route photo
+# --------------------------------------------------------------------------- #
+def test_sheet_photo_is_never_cropped(page):
+    """A route photo is the point of the route. The band used to cover-crop
+    to a fixed height, so a portrait shot lost its top and bottom -- exactly
+    the parts that show where the route starts and finishes."""
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    fit = page.eval_on_selector("#simg", "el => getComputedStyle(el).objectFit")
+    assert fit == "contain"
+
+
+def test_tapping_the_photo_opens_it_full_screen(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    assert page.locator("#lightbox").is_hidden()
+
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+    assert page.locator("#lbimg").get_attribute("src")
+    assert page.eval_on_selector("#lbimg", "el => getComputedStyle(el).objectFit") == "contain"
+
+    page.locator("#lbclose").click()
+    page.wait_for_selector(".lightbox:not(.open)", state="attached")
+    # closing the photo returns to the route, it does not dump you on the list
+    assert page.locator("#sheet").is_visible()
+    assert page.locator("#sname").inner_text() == "Crack Line"
+
+
+def test_escape_unwinds_the_photo_before_the_sheet(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".lightbox:not(.open)", state="attached")
+    assert page.locator("#sheet").is_visible()
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert not page.locator("#sheet").is_visible()
+
+
+def test_telegram_back_unwinds_the_photo_before_the_sheet(page):
+    """Inside Telegram the native back button is the exit people reach for,
+    and it has to peel one layer at a time."""
+    page.evaluate(
+        "window.Telegram={WebApp:{BackButton:{"
+        "show(){window.__bb=true},hide(){window.__bb=false},"
+        "onClick(fn){window.__fire=fn}}}}"
+    )
+    page.evaluate("window.Telegram.WebApp.BackButton.onClick(onBack)")
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+
+    page.evaluate("window.__fire()")
+    page.wait_for_selector(".lightbox:not(.open)", state="attached")
+    assert page.locator("#sheet").is_visible()
+    assert page.evaluate("window.__bb") is True   # still armed for the sheet
+
+    page.evaluate("window.__fire()")
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert page.evaluate("window.__bb") is False
+
+
+def test_closing_the_sheet_takes_the_photo_with_it(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+
+    page.eval_on_selector("#scrim", "el => el.click()")
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    # a full-screen photo left floating over the route list would trap the user
+    assert page.locator("#lightbox").is_hidden()
+
+
+@pytest.fixture
+def photoless_live_server(tmp_path, monkeypatch):
+    """A route archived without a photo, so /api/photo 404s for it."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "nophoto.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+    api_mod.storage.add_route(name="No Shot", grade="V4",
+                              grade_low=V_ORDER.index("V4"), wall="Left")
+    base_url, server, thread = _boot_server(api_mod.app)
+    yield {"base_url": base_url}
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+def test_a_route_without_a_photo_offers_no_enlarge(photoless_live_server):
+    """Regression: the band still said 'tap to enlarge' and opened a
+    full-screen black rectangle for a route that has no photo at all."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(photoless_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        pg.locator(".card").first.click()
+        pg.wait_for_selector(".scrim.open")
+        pg.wait_for_function("document.querySelector('#shot').classList.contains('nophoto')")
+
+        assert pg.locator(".zoomhint").is_hidden()
+        assert pg.locator("#shot").get_attribute("role") is None
+        pg.locator("#shot").click()
+        pg.wait_for_timeout(150)
+        assert pg.locator("#lightbox").is_hidden()
+        browser.close()
+
+
+def test_the_open_photo_blocks_the_keyboard_from_what_is_underneath(page):
+    """Regression: nothing behind the overlay was inert, so Tab walked onto
+    the tick button hidden under the photo. One blind Tab+Enter un-ticked the
+    route while the screen showed only the image."""
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+
+    assert page.evaluate("document.activeElement && document.activeElement.id") == "lbclose"
+    for _ in range(6):
+        page.keyboard.press("Tab")
+        inside_sheet = page.evaluate(
+            "document.activeElement ? document.querySelector('#sheet').contains(document.activeElement) : false")
+        assert not inside_sheet, "focus reached a control hidden under the photo"
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".lightbox:not(.open)", state="attached")
+    # the controls come back once the photo is gone
+    assert page.evaluate("document.querySelector('#stck').closest('[inert]') === null")
+
+
+def test_a_failed_reload_clears_the_stale_list(live_server):
+    """Regression: load()'s catch showed a retry link but left the old cards
+    on screen and state.routes undefined, so tapping one threw after the
+    server had already stored the write."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+
+        pg.route("**/api/routes*", lambda r: r.fulfill(status=500, body="boom"))
+        pg.evaluate("load()")
+        pg.wait_for_selector("#retry")
+
+        assert pg.locator(".card").count() == 0
+        # a rejected payload is never adopted, so the collection stays an array
+        assert pg.evaluate("Array.isArray(state.routes)") is True
+        # and even if it were not, the lookup returns empty instead of throwing
+        assert pg.evaluate("state.routes = undefined; findRoutes(1).length") == 0
+        browser.close()
+
+
+def test_a_failed_write_does_not_report_into_another_route(authed_page):
+    """Regression: the wrong-route gate was added to the success branch only,
+    so a rejected rating painted a red error under a different route's stars."""
+    authed_page.evaluate("""
+      window.__release = null;
+      const real = window.fetch;
+      window.fetch = (u, o) => String(u).includes('/api/rate/')
+        ? new Promise(done => { window.__release = () => done(new Response(
+            JSON.stringify({error: 'server exploded'}),
+            {status: 500, headers: {'Content-Type': 'application/json'}})); })
+        : real(u, o);
+    """)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.wait_for_function("window.__release !== null")
+
+    authed_page.keyboard.press("Escape")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+    authed_page.locator(".card", has_text="Weird").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.evaluate("window.__release()")
+    authed_page.wait_for_timeout(250)
+
+    assert authed_page.locator("#ratesaved").is_hidden()
+
+
+def test_a_collapsed_grade_range_can_still_be_moved(page):
+    """Regression: the z-index swap only rescued the very top of the scale.
+    Collapse the range anywhere else and the thumb painted on top was pinned
+    by the other one, so the list stayed empty with no way to reopen it."""
+    mid = V_ORDER.index("V5")
+    _drag(page, "#max", mid)
+    _drag(page, "#min", mid)
+    assert page.evaluate("[state.min, state.max]") == [mid, mid]
+
+    box = page.locator(".range-wrap").bounding_box()
+    y = box["y"] + box["height"] / 2
+    x = box["x"] + box["width"] * (mid / (len(V_ORDER) - 1))
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] * 0.05, y, steps=12)
+    page.mouse.up()
+
+    # the pair moves instead of jamming, so the filter is never a dead end
+    assert page.evaluate("state.min") < mid
+
+
+def test_telegram_back_button_is_actually_wired_to_the_unwind(live_server):
+    """The sibling test re-registers the handler by hand, so it exercises the
+    unwind logic but not the registration itself. This one installs a stub
+    before the page's own script runs, so the real wiring has to happen."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.add_init_script("""
+          window.Telegram = {WebApp: {
+            initData: "", initDataUnsafe: {},
+            ready(){}, expand(){},
+            BackButton: {
+              show(){window.__bb = true}, hide(){window.__bb = false},
+              onClick(fn){window.__registered = fn},
+            },
+          }};
+        """)
+        pg.goto(live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        assert pg.evaluate("typeof window.__registered") == "function"
+
+        pg.locator(".card", has_text="Crack Line").click()
+        pg.wait_for_selector(".scrim.open")
+        pg.locator("#shot").click()
+        pg.wait_for_selector(".lightbox.open")
+
+        pg.evaluate("window.__registered()")
+        pg.wait_for_selector(".lightbox:not(.open)", state="attached")
+        assert pg.locator("#sheet").is_visible()
+
+        pg.evaluate("window.__registered()")
+        pg.wait_for_selector(".scrim:not(.open)", state="attached")
+        assert pg.evaluate("window.__bb") is False
+        browser.close()
+
+
+# --------------------------------------------------------------------------- #
+# pinch / pan / double-tap zoom in the full-screen photo
+# --------------------------------------------------------------------------- #
+def _real_png(path, w, h):
+    """A PNG with actual dimensions -- the shared fixture's 1x1 pixel lays out
+    as a 1x1 box, which is useless for testing zoom and panning."""
+    import struct
+    import zlib
+
+    rows = []
+    for y in range(h):
+        pixels = bytearray()
+        for x in range(w):
+            pixels += bytes(((x * 7) % 256, (y * 5) % 256, 128))
+        rows.append(b"\x00" + bytes(pixels))
+
+    def chunk(tag, data):
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    path.write_bytes(b"\x89PNG\r\n\x1a\n"
+                     + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(b"".join(rows)))
+                     + chunk(b"IEND", b""))
+
+
+@pytest.fixture
+def zoom_page(tmp_path, monkeypatch):
+    """A live server with one route carrying a genuinely large photo, and a
+    page already sitting on its open full-screen view."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "zoom.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+    photo = tmp_path / "big.png"
+    _real_png(photo, 600, 800)
+    api_mod.storage.add_route(name="Big Shot", grade="V4",
+                              grade_low=V_ORDER.index("V4"), wall="Left",
+                              photo_path=str(photo))
+    base_url, server, thread = _boot_server(api_mod.app)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page(viewport={"width": 390, "height": 844})
+        pg.goto(base_url + "/")
+        pg.wait_for_selector(".card")
+        pg.locator(".card").first.click()
+        pg.wait_for_selector(".scrim.open")
+        pg.locator("#shot").click()
+        pg.wait_for_selector(".lightbox.open")
+        yield pg
+        browser.close()
+
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+def _pinch(pg, from_gap, to_gap, steps=6):
+    """Two fingers on the photo, spreading (or closing) about its centre."""
+    pg.evaluate("""([fromGap, toGap, steps]) => {
+      const box = document.querySelector('#lightbox');
+      const r = box.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const send = (type, id, x, y) => box.dispatchEvent(
+        new PointerEvent(type, {pointerId: id, clientX: x, clientY: y,
+                                bubbles: true, cancelable: true}));
+      send('pointerdown', 1, cx - fromGap / 2, cy);
+      send('pointerdown', 2, cx + fromGap / 2, cy);
+      for (let i = 1; i <= steps; i++) {
+        const gap = fromGap + (toGap - fromGap) * (i / steps);
+        send('pointermove', 1, cx - gap / 2, cy);
+        send('pointermove', 2, cx + gap / 2, cy);
+      }
+      send('pointerup', 1, cx - toGap / 2, cy);
+      send('pointerup', 2, cx + toGap / 2, cy);
+    }""", [from_gap, to_gap, steps])
+
+
+def test_pinching_zooms_the_photo(zoom_page):
+    assert zoom_page.evaluate("zoom.scale") == 1
+    _pinch(zoom_page, 100, 300)
+    assert zoom_page.evaluate("zoom.scale") == pytest.approx(3.0, abs=0.2)
+    assert "zoomed" in zoom_page.locator("#lightbox").get_attribute("class")
+
+    _pinch(zoom_page, 300, 100)
+    assert zoom_page.evaluate("zoom.scale") == pytest.approx(1.0, abs=0.2)
+
+
+def test_pinching_is_clamped_at_both_ends(zoom_page):
+    _pinch(zoom_page, 20, 900)
+    assert zoom_page.evaluate("zoom.scale") <= 6.0
+    _pinch(zoom_page, 900, 10)
+    assert zoom_page.evaluate("zoom.scale") >= 1.0
+
+
+def test_double_tap_toggles_a_close_up(zoom_page):
+    zoom_page.locator("#lbimg").dblclick()
+    assert zoom_page.evaluate("zoom.scale") > 1.5
+    zoom_page.locator("#lbimg").dblclick()
+    assert zoom_page.evaluate("zoom.scale") == pytest.approx(1.0, abs=0.01)
+
+
+def test_panning_a_zoomed_photo_is_bounded(zoom_page):
+    _pinch(zoom_page, 100, 400)
+    assert zoom_page.evaluate("zoom.scale") > 2
+
+    box = zoom_page.locator("#lightbox").bounding_box()
+    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    zoom_page.mouse.move(cx, cy)
+    zoom_page.mouse.down()
+    zoom_page.mouse.move(cx, cy - 4000, steps=10)   # drag far past the edge
+    zoom_page.mouse.up()
+
+    # the photo moved, but never off-screen: the offset stops at the overflow
+    scale, off = zoom_page.evaluate("[zoom.scale, zoom.y]")
+    img_h = zoom_page.evaluate("document.querySelector('#lbimg').offsetHeight")
+    limit = max(0, (img_h * scale - box["height"]) / 2)
+    assert off < 0
+    assert abs(off) <= limit + 1
+
+
+def test_the_photo_itself_is_not_a_close_button(zoom_page):
+    """It is an interactive surface now: you have to be able to put a finger
+    on it to pinch without the viewer vanishing underneath you."""
+    zoom_page.locator("#lbimg").click()
+    zoom_page.wait_for_timeout(150)
+    assert zoom_page.locator("#lightbox").is_visible()
+
+    zoom_page.locator("#lbclose").click()
+    zoom_page.wait_for_selector(".lightbox:not(.open)", state="attached")
+
+
+def test_reopening_a_photo_starts_back_at_fit(zoom_page):
+    _pinch(zoom_page, 100, 350)
+    assert zoom_page.evaluate("zoom.scale") > 2
+    zoom_page.locator("#lbclose").click()
+    zoom_page.wait_for_selector(".lightbox:not(.open)", state="attached")
+
+    zoom_page.locator("#shot").click()
+    zoom_page.wait_for_selector(".lightbox.open")
+    assert zoom_page.evaluate("zoom.scale") == 1
+    assert zoom_page.evaluate("[zoom.x, zoom.y]") == [0, 0]
+
+
+def test_tapping_the_letterbox_still_dismisses(zoom_page):
+    """The photo is contained, so there is dark space beside it. Tapping that
+    closes, the way a lightbox backdrop should -- but only at fit scale, so a
+    stray thumb while inspecting a zoomed photo does not throw it away."""
+    box = zoom_page.locator("#lightbox").bounding_box()
+    img = zoom_page.locator("#lbimg").bounding_box()
+    gap_y = img["y"] / 2                      # above the photo, inside the overlay
+    assert gap_y > 4, "no letterbox to tap in this layout"
+
+    _pinch(zoom_page, 100, 350)
+    zoom_page.mouse.click(box["x"] + box["width"] / 2, gap_y)
+    zoom_page.wait_for_timeout(150)
+    assert zoom_page.locator("#lightbox").is_visible(), "closed while zoomed in"
+
+    _pinch(zoom_page, 350, 60)                 # back to fit
+    assert zoom_page.evaluate("zoom.scale") == pytest.approx(1.0, abs=0.05)
+    zoom_page.wait_for_timeout(350)            # clear of any double-tap window
+    zoom_page.mouse.click(box["x"] + box["width"] / 2, gap_y)
+    zoom_page.wait_for_selector(".lightbox:not(.open)", state="attached")
+
+
+def test_keyboard_can_zoom_and_reset(zoom_page):
+    zoom_page.keyboard.press("+")
+    assert zoom_page.evaluate("zoom.scale") > 1.2
+    zoom_page.keyboard.press("0")
+    assert zoom_page.evaluate("zoom.scale") == 1
+    # Escape still closes rather than being swallowed by the zoom shortcuts
+    zoom_page.keyboard.press("Escape")
+    zoom_page.wait_for_selector(".lightbox:not(.open)", state="attached")

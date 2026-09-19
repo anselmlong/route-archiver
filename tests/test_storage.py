@@ -788,8 +788,121 @@ def test_migration_remaps_subscription_thresholds(tmp_path, storage_module):
 
 
 def test_migration_runs_once_and_leaves_fresh_dbs_alone(tmp_path, storage_module):
-    path = _fake_legacy_db(tmp_path, storage_module, [("Hard", "V6", 7)])
+    path = _fake_legacy_db(tmp_path, storage_module, [("Hard", "V6", 7)], sub_low=5)
     storage_module.Storage(db_path=path)
     again = storage_module.Storage(db_path=path)
     # re-running over already-correct indices must be a no-op, not a shift
     assert again.list_routes()[0]["grade_low"] == gl("V6")
+    # the subscription remap is the part that is NOT idempotent -- it feeds a
+    # bare index back through the legacy scale, so a second pass would move it
+    assert again.get_subscription(1)["min_grade_low"] == gl("V4")
+
+
+def test_migration_re_reads_the_version_stamp_under_the_write_lock(tmp_path, storage_module):
+    """The bot and the API each build a Storage at import, so restarting both
+    services races two migrations on one DB. Recomputing routes and ticks twice
+    is harmless, but the subscription remap feeds a bare index back through the
+    legacy scale, so the loser of the race must notice the winner's version
+    stamp -- which means reading it only after taking the write lock."""
+    import sqlite3
+    import threading
+    import time
+
+    path = _fake_legacy_db(tmp_path, storage_module, [("Hard", "V6", 7)], sub_low=5)
+
+    # stand in for the process that wins: migrate and stamp, but hold the
+    # write lock open so the loser has to decide while the stamp is unreadable
+    winner = sqlite3.connect(path, timeout=30)
+    winner.isolation_level = None
+    winner.execute("BEGIN IMMEDIATE")
+    winner.execute("UPDATE subscriptions SET min_grade_low=? WHERE tg_user_id=1",
+                   (gl("V4"),))
+    winner.execute(f"PRAGMA user_version = {storage_module.SCHEMA_VERSION}")
+
+    failed = []
+    loser_started = threading.Event()
+
+    def loser():
+        loser_started.set()
+        try:
+            storage_module.Storage(db_path=path)
+        except BaseException as exc:  # pragma: no cover - surfaced by the assert
+            failed.append(exc)
+
+    thread = threading.Thread(target=loser)
+    thread.start()
+    loser_started.wait(timeout=5)
+    time.sleep(0.5)  # give the loser time to reach its version check
+    winner.execute("COMMIT")
+    winner.close()
+    thread.join(timeout=30)
+
+    assert not thread.is_alive(), "second Storage never finished migrating"
+    assert not failed, failed
+    with sqlite3.connect(path) as conn:
+        got = conn.execute(
+            "SELECT min_grade_low FROM subscriptions WHERE tg_user_id=1"
+        ).fetchone()[0]
+    # a second pass turns legacy 5 (V4) into V8 -- and a V8+ threshold into
+    # NULL, i.e. "any grade" -- silently changing who gets alerted
+    assert got == gl("V4")
+
+
+def test_parse_caption_clamps_v17_plus():
+    # the grade regex accepts V17+, so the parse table has to hold it too --
+    # otherwise the one token the regex matches and the table lacks makes the
+    # bot reject the caption instead of clamping it like V17 and V16+
+    assert parse_caption("Mega Line / V17+ / right slab")["grade"] == "V8+"
+    assert parse_caption("Mega Line / V17 / right slab")["grade"] == "V8+"
+
+
+def test_set_tick_grade_reports_when_there_is_no_tick(storage):
+    r = storage.add_route(name="X", grade="V4", grade_low=gl("V4"))
+    assert storage.set_tick_grade(r["id"], tg_user_id=7, suggested_grade="V6") is False
+    storage.toggle_tick(r["id"], tg_user_id=7, tg_user_name="A")
+    assert storage.set_tick_grade(r["id"], tg_user_id=7, suggested_grade="V6") is True
+
+
+def test_startup_waits_out_a_locked_non_wal_database(tmp_path, storage_module):
+    """Switching journal mode takes an exclusive lock and refuses immediately
+    instead of waiting out the busy timeout. A deploy restarts the bot and the
+    API together and each builds a Storage at import, so on a DB not yet in
+    WAL -- a restored backup or a copy -- the second one died here in
+    milliseconds rather than waiting for the first to finish."""
+    import sqlite3
+    import threading
+    import time
+
+    path = tmp_path / "legacy_journal.db"
+    seed = sqlite3.connect(path)
+    seed.execute("CREATE TABLE placeholder (x INTEGER)")
+    seed.commit()
+    assert seed.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal"
+    seed.close()
+
+    # the winner of the race, holding the write lock while it works
+    holder = sqlite3.connect(path, timeout=30)
+    holder.isolation_level = None
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("INSERT INTO placeholder VALUES (1)")
+
+    failed = []
+    started = threading.Event()
+
+    def loser():
+        started.set()
+        try:
+            storage_module.Storage(db_path=path)
+        except BaseException as exc:
+            failed.append(exc)
+
+    thread = threading.Thread(target=loser)
+    thread.start()
+    started.wait(timeout=5)
+    time.sleep(0.8)          # long enough that a non-waiting loser is already dead
+    holder.execute("COMMIT")
+    holder.close()
+    thread.join(timeout=30)
+
+    assert not thread.is_alive(), "second Storage never finished starting"
+    assert not failed, f"startup died instead of waiting: {failed}"
