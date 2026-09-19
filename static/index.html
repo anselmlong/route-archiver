@@ -412,7 +412,8 @@ async function load(){
 
 function setWallOptions(walls){
   const sel=$("#wall");
-  sel.innerHTML='<option value="">All walls</option>'+walls.map(w=>`<option value="${w}">${w}</option>`).join("");
+  sel.innerHTML='<option value="">All walls</option>'+
+    walls.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join("");
 }
 
 function gn(i){return state.grades[i]||""}
@@ -484,10 +485,12 @@ function findRoutes(id){
   // state.hot.routes (this week's hot list) and state.setter.routes (a
   // setter's profile) -- return every copy so a rating/tick updates
   // whichever one is actually on screen
+  // an error body (a 404 {detail} or a 401 {error}) carries no routes, so
+  // every collection is shape-checked before it is walked
   const out=state.routes.filter(x=>x.id===id);
-  if(state.mine)out.push(...state.mine.routes.filter(x=>x.id===id));
-  if(state.hot)out.push(...state.hot.routes.filter(x=>x.id===id));
-  if(state.setter)out.push(...state.setter.routes.filter(x=>x.id===id));
+  for(const c of [state.mine,state.hot,state.setter]){
+    if(c&&Array.isArray(c.routes))out.push(...c.routes.filter(x=>x.id===id));
+  }
   return out;
 }
 
@@ -521,7 +524,7 @@ function renderGrid(list){
   grid.querySelectorAll(".card").forEach(c=>{
     const r=list.find(x=>x.id===Number(c.dataset.id));
     c.querySelector(".nm").textContent=r.name;
-    c.onclick=e=>{if(e.target.closest("button"))return;open(r)};
+    c.onclick=e=>{if(e.target.closest("button"))return;openRoute(r)};
   });
 }
 
@@ -537,6 +540,12 @@ function updateRangeUI(){
   const pL=(state.min/n)*100, pR=100-(state.max/n)*100;
   $("#dFill").style.left=pL+"%";
   $("#dFill").style.width=(100-pL-pR)+"%";
+  // the two inputs overlap, so whichever is painted on top wins the touch.
+  // Once min reaches the top of the scale, max has nowhere left to go and
+  // the range would be stuck shut, so hand the grab to min instead.
+  const atTop=state.min>=n;
+  $("#min").style.zIndex=atTop?3:1;
+  $("#max").style.zIndex=atTop?1:2;
 }
 
 /* ---- view switching: Browse / Mine / Leaderboard ---- */
@@ -576,7 +585,9 @@ async function loadMine(){
   }
   $("#sub").textContent="loading your ticks…";
   try{
-    state.mine=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
+    const d=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
+    if(!d||!Array.isArray(d.routes))throw new Error(d&&d.error||"no history");
+    state.mine=d;
     setSub();
     renderMine();
   }catch(e){
@@ -651,7 +662,8 @@ async function openSetter(setterId){
   try{
     let q="/api/setter/"+setterId;
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
-    state.setter=await fetch(q).then(x=>x.json());
+    const d=await fetch(q).then(x=>x.json());
+    state.setter=(d&&Array.isArray(d.routes))?d:null;
     setSub();
     renderSetter();
   }catch(e){
@@ -662,9 +674,8 @@ async function openSetter(setterId){
 
 function renderSetter(){
   const p=state.setter;
-  if(!p)return;
-  if(p.detail){
-    // FastAPI's default 404 body ({"detail": "..."}) -- setter not found
+  if(!p){
+    // the fetch came back without a profile -- setter not found
     $("#setterStats").innerHTML='<div class="empty">Setter not found.</div>'+
       '<button class="backbtn" id="setterBack">← Back to Browse</button>';
     $("#setterBack").onclick=()=>setView("browse");
@@ -718,31 +729,37 @@ function renderBoard(){
 /* ---- sheet buttons ---- */
 async function rate(id,val){
   if(!state.initData){alert("Open via Telegram to rate (one rating per account).");return}
-  const slot=$("#ratesaved");
+  const slot=$("#ratesaved"), view=state.view;
   try{
     const res=await fetch(`/api/rate/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
     if(!res.ok){flash(slot,d.error||"Couldn't save",true);return}
     if(d.avg!==undefined)findRoutes(id).forEach(r=>{r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating});
-    renderGrid(state.curList);
-    if(state.cur&&state.cur.id===id)refreshSheet();
-    flash(slot,d.my_rating?"✓ rating saved":"✓ rating cleared");
+    if(state.view===view)renderGrid(state.curList);
+    if(state.cur&&state.cur.id===id){
+      refreshSheet();
+      flash(slot,d.my_rating?"✓ rating saved":"✓ rating cleared");
+    }
   }catch(e){flash(slot,"Couldn't save — check connection",true)}
 }
 
 async function tick(id,val){
   if(!state.initData){alert("Open via Telegram to tick (ticklist is per account).");return}
+  const view=state.view;
   try{
     const res=await fetch(`/api/tick/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
-    const d=await res.json();
+    const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
     if(!res.ok){flash($("#gradesaved"),d.error||"Couldn't save",true);return}
     if(d.ticked!==undefined)findRoutes(id).forEach(r=>{
       r.my_tick=d.ticked?1:0;r.tick_count=d.count;
+      // un-ticking drops the suggestion server-side and re-ticking starts
+      // without one, so mirror that instead of leaving the old value showing
+      r.my_suggested_grade=d.suggested_grade||null;
       r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
     });
-    renderGrid(state.curList);
+    if(state.view===view)renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
   }catch(e){flash($("#gradesaved"),"Couldn\'t save — check connection",true)}
 }
@@ -751,6 +768,7 @@ async function setTickGrade(id){
   const g=$("#stckgrade").value.trim();
   const slot=$("#gradesaved");
   if(!g||!state.initData)return;
+  const wasOpen=state.cur&&state.cur.id===id;
   try{
     const res=await fetch(`/api/tick/${id}/grade`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggested_grade:g,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
@@ -761,9 +779,8 @@ async function setTickGrade(id){
       r.my_suggested_grade=g;
       r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
     });
-    if(state.cur&&state.cur.id===id)refreshSheet();
-    flash(slot,"✓ grade saved");
-  }catch(e){flash(slot,"Couldn\'t save — check connection",true)}
+    if(state.cur&&state.cur.id===id){refreshSheet();flash(slot,"✓ grade saved")}
+  }catch(e){if(wasOpen&&state.cur&&state.cur.id===id)flash(slot,"Couldn\'t save — check connection",true)}
 }
 
 /* ---- sheet open/refresh ---- */
@@ -823,7 +840,7 @@ async function deleteRoute(routeId){
   if(!confirm("Delete this route? This hides it from the wall and everyone's view (ratings/ticks kept)."))return;
   try{
     const res=await fetch(`/api/routes/${routeId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
-    const d=await res.json();
+    const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
     if(res.status===403){alert("Admins only.");return}
     if(!res.ok){alert(d.error||"Couldn't delete that route.");return}
@@ -840,7 +857,7 @@ function tgBack(show){
   try{show?w.BackButton.show():w.BackButton.hide()}catch(e){}
 }
 
-function open(r){
+function openRoute(r){
   state.cur=r;
   $("#simg").src=`/api/photo/${r.id}`;
   $("#ratesaved").hidden=true;
@@ -897,9 +914,10 @@ function renderComments(routeId,comments){
   });
 }
 
-function bumpCommentCount(routeId,delta){
+function bumpCommentCount(routeId,delta,view){
   findRoutes(routeId).forEach(r=>{r.comment_count=Math.max(0,(r.comment_count||0)+delta)});
-  renderGrid(state.curList);
+  // repaint only if the user is still on the view that list belongs to
+  if(view===undefined||state.view===view)renderGrid(state.curList);
 }
 
 async function postComment(routeId){
@@ -907,25 +925,29 @@ async function postComment(routeId){
   const text=input.value.trim();
   if(!text)return;
   if(!state.initData){alert("Open via Telegram to comment.");return}
+  const view=state.view;
   try{
     const res=await fetch(`/api/comments/${routeId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,init_data:state.initData})});
-    const d=await res.json();
+    const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
     if(!res.ok){alert(d.error||"Couldn't post that comment.");return}
     input.value="";
-    bumpCommentCount(routeId,1);
+    bumpCommentCount(routeId,1,view);
     loadComments(routeId);
   }catch(e){alert("Couldn't post your comment. Check your connection and try again.")}
 }
 
 async function deleteComment(commentId,routeId){
+  const view=state.view;
   try{
     await fetch(`/api/comments/${commentId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
-    bumpCommentCount(routeId,-1);
+    bumpCommentCount(routeId,-1,view);
     loadComments(routeId);
   }catch(e){alert("Couldn't delete your comment. Check your connection and try again.")}
 }
 function closeSheet(){
+  const el=document.activeElement;
+  if(el&&$("#sheet").contains(el)&&typeof el.blur==="function")el.blur();
   $("#scrim").classList.remove("open");
   $("#sheet").classList.remove("open");
   state.cur=null;
@@ -938,7 +960,15 @@ function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt
 /* ---- wire up ---- */
 $("#scrim").onclick=closeSheet;
 $("#sheetclose").onclick=closeSheet;
-document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Escape"||!$("#sheet").classList.contains("open"))return;
+  const el=document.activeElement;
+  if(el&&$("#sheet").contains(el)&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")){
+    el.blur();  // commits a pending grade edit and keeps a comment draft
+    return;
+  }
+  closeSheet();
+});
 $("#viewseg").querySelectorAll("button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
 $("#sort").onchange=e=>{state.sort=e.target.value;paint()};
 $("#wall").onchange=e=>{state.wall=e.target.value;paint()};

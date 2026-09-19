@@ -885,3 +885,174 @@ def test_close_button_stays_reachable_after_scrolling_the_sheet(page):
     page.locator("#sheetclose").click()
     page.wait_for_selector(".scrim:not(.open)", state="attached")
     assert not page.locator("#sheet").is_visible()
+
+
+# --------------------------------------------------------------------------- #
+# defects found by the correctness review
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def hostile_wall_live_server(tmp_path, monkeypatch):
+    """A wall name carrying an HTML payload. An unrecognised wall is stored
+    verbatim by _norm_wall, and the bot derives walls from forum topic titles,
+    so a crafted topic name reaches every viewer's wall dropdown."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "wall_xss.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+    photo = tmp_path / "route.png"
+    photo.write_bytes(_PNG_1PX)
+    api_mod.storage.add_route(
+        name="Innocent", grade="V4", grade_low=V_ORDER.index("V4"),
+        wall='left"><img src=x onerror="window.__wallxss=1">', photo_path=str(photo))
+
+    base_url, server, thread = _boot_server(api_mod.app)
+    yield {"base_url": base_url}
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+def test_wall_names_are_escaped_in_the_filter_dropdown(hostile_wall_live_server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(hostile_wall_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        assert pg.evaluate("window.__wallxss") is None
+        assert pg.locator("#wall img").count() == 0
+        # the payload survives as inert text in the option label
+        assert "onerror" in pg.locator("#wall").inner_text()
+        browser.close()
+
+
+def test_a_missing_setter_profile_does_not_break_later_writes(authed_page):
+    """Regression: openSetter stored the raw response, so a 404 body (which
+    has no routes array) poisoned findRoutes. Every later rating and tick then
+    threw after the server had already stored it, so the sheet reported a
+    connection failure -- and the obvious retry silently undid the write."""
+    authed_page.evaluate("openSetter(99999)")
+    authed_page.wait_for_selector("#setterBack")
+    assert "not found" in authed_page.locator("#setterStats").inner_text().lower()
+    authed_page.locator("#setterBack").click()
+    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.wait_for_selector("#ratesaved:not([hidden])")
+    saved = authed_page.locator("#ratesaved")
+    assert "bad" not in (saved.get_attribute("class") or "")
+    assert "saved" in saved.inner_text()
+
+
+def test_grade_range_can_be_reopened_from_the_top_of_the_scale(page):
+    """Regression: both range inputs overlap, and at the top of the scale the
+    one painted on top was the max thumb, which is clamped by min. Dragging it
+    back did nothing, leaving an empty list with no way out but a reload."""
+    top = len(V_ORDER) - 1
+    _drag(page, "#min", top)
+    assert page.locator(".card").count() == 0
+
+    box = page.locator(".range-wrap").bounding_box()
+    y = box["y"] + box["height"] / 2
+    page.mouse.move(box["x"] + box["width"] - 2, y)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] * 0.3, y, steps=12)
+    page.mouse.up()
+
+    assert page.evaluate("state.min") < top
+    assert page.locator(".card").count() > 0
+
+
+def test_a_late_rating_response_does_not_confirm_on_another_route(authed_page):
+    """Regression: the saved indicator was not gated on the sheet still
+    showing the route that was rated, so a slow response painted a green
+    'rating saved' next to a different route's empty stars."""
+    # hold the rating response open from inside the page, so the ordering is
+    # deterministic -- a sleeping route handler would block the click itself
+    authed_page.evaluate("""
+      window.__release = null;
+      const real = window.fetch;
+      window.fetch = (u, o) => String(u).includes('/api/rate/')
+        ? new Promise(done => { window.__release = () => done(new Response(
+            JSON.stringify({avg: 3, count: 1, my_rating: 3}),
+            {status: 200, headers: {'Content-Type': 'application/json'}})); })
+        : real(u, o);
+    """)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.wait_for_function("window.__release !== null")
+
+    authed_page.keyboard.press("Escape")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+    authed_page.locator(".card", has_text="Weird").click()
+    authed_page.wait_for_selector(".scrim.open")
+
+    authed_page.evaluate("window.__release()")
+    authed_page.wait_for_timeout(250)
+
+    assert authed_page.locator("#ratesaved").is_hidden()
+    assert authed_page.evaluate("state.cur.my_rating") in (None, 0)
+
+
+def _reload_personalised(pg):
+    """The authed fixture sets initData after the first load, so re-fetch to
+    get my_tick / my_suggested_grade attached to the routes."""
+    pg.evaluate("load()")
+    pg.wait_for_function("state.routes.length && state.routes.some(r => r.my_tick)")
+
+
+def test_escape_commits_a_pending_grade_edit(authed_page):
+    """Regression: closeSheet nulled state.cur inside the keydown handler, so
+    the input's change event (which only fires on blur) found nothing to save.
+    The X button saved the edit and Escape silently dropped it."""
+    _reload_personalised(authed_page)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#stckgrade").fill("V7")
+    authed_page.keyboard.press("Escape")   # first leaves the field
+    authed_page.keyboard.press("Escape")   # second closes the sheet
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    assert authed_page.locator("#stckgrade").input_value() == "V7"
+    assert "V7" in authed_page.locator("#sconsensus").inner_text()
+
+
+def test_escape_in_the_comment_box_keeps_the_draft(authed_page):
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#cinput").click()
+    authed_page.locator("#cinput").fill("heel hook the arete")
+    authed_page.keyboard.press("Escape")
+
+    assert authed_page.locator("#sheet").is_visible()
+    assert authed_page.locator("#cinput").input_value() == "heel hook the arete"
+    authed_page.keyboard.press("Escape")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+
+
+def test_re_ticking_clears_the_previous_suggested_grade(authed_page):
+    """Regression: a fresh tick carries no suggestion server-side, but the
+    sheet kept showing the old one, so the climber had no reason to re-enter
+    it and it never rejoined the consensus."""
+    _reload_personalised(authed_page)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    # make the suggestion differ from the setter's own grade, so the fallback
+    # and the stale value are telling apart
+    authed_page.locator("#stckgrade").fill("V7")
+    authed_page.locator("#stckgrade").blur()
+    authed_page.wait_for_function("state.cur.my_suggested_grade === 'V7'")
+
+    authed_page.locator("#stck").click()          # untick
+    authed_page.wait_for_function("state.cur.my_tick === 0")
+    authed_page.locator("#stck").click()          # re-tick
+    authed_page.wait_for_function("state.cur.my_tick === 1")
+
+    assert authed_page.evaluate("state.cur.my_suggested_grade") in (None, "")
+    # falls back to the setter's grade, not the suggestion the server dropped
+    assert authed_page.locator("#stckgrade").input_value() == "V4"
