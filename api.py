@@ -248,6 +248,23 @@ async def delete_comment(comment_id: int, body: DeleteCommentBody, request: Requ
     return {"deleted": True}
 
 
+@app.delete("/api/routes/{route_id}")
+async def delete_route(route_id: int, body: DeleteCommentBody, request: Request):
+    """Admin-only: remove a route from the collection (soft delete — same
+    as the bot's 🗑 Delete, reversibly flags it deleted so it stops
+    appearing everywhere). Non-admins get 403; unknown routes 404."""
+    try:
+        uid, _ = _identity(body, request)
+    except ValueError as e:
+        return JSONResponse(status_code=401, content={"error": str(e)})
+    if uid not in ADMINS:
+        return JSONResponse(status_code=403, content={"error": "admins only"})
+    if not storage.get_route(route_id):
+        return JSONResponse(status_code=404, content={"error": "route not found"})
+    storage.delete_route(route_id, hard=False)
+    return {"deleted": True, "route_id": route_id}
+
+
 @app.get("/api/meta")
 def meta():
     stats = storage.stats()
@@ -290,6 +307,7 @@ def me(request: Request, tg: str | None = None):
 
     return {
         "name": name,
+        "is_admin": uid in ADMINS,
         "routes": rows,
         "count": len(rows),
         "grade_pyramid": pyramid,

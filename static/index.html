@@ -115,6 +115,7 @@
   .tickbtn{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:9px;padding:8px 12px;font-size:13px;cursor:pointer}
   .tickbtn.on{background:var(--tick);color:#04130a;border-color:var(--tick)}
   .tickmeta{color:var(--muted);font-size:12.5px}
+  .admindel{color:#ff6b6b;border:1px solid #ff6b6b55;background:transparent;border-radius:9px;padding:6px 12px;font-size:13px;cursor:pointer;margin-left:8px}
   .tickgrade{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:13px;width:72px;text-transform:uppercase}
   .tickgrade.hidden{display:none}
 
@@ -215,7 +216,7 @@
 <script>
 const $=s=>document.querySelector(s);
 const state={routes:[],sort:"grade",wall:"",search:"",min:0,max:1,grades:[],cur:null,initData:"",
-  view:"browse",curList:[],mine:null,board:null,hot:null,setter:null};
+  view:"browse",curList:[],mine:null,board:null,hot:null,setter:null,isAdmin:false};
 
 (function tg(){
   if(window.Telegram&&window.Telegram.WebApp){
@@ -224,6 +225,11 @@ const state={routes:[],sort:"grade",wall:"",search:"",min:0,max:1,grades:[],cur:
     if(window.Telegram.WebApp.initData) state.initData=window.Telegram.WebApp.initData;
     const u=window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user;
     if(u&&u.first_name)$("#sub").textContent="hey "+u.first_name+" · tap a card for details";
+    // learn whether the caller is an admin (drives the Delete route button)
+    if(state.initData){
+      fetch("/api/me?tg="+encodeURIComponent(state.initData))
+        .then(x=>x.json()).then(d=>{ state.isAdmin=!!d.is_admin; }).catch(()=>{});
+    }
   }
 })();
 
@@ -591,6 +597,27 @@ function refreshSheet(){
   }else{
     foot.textContent=fmtDate(r.created_at);
   }
+  if(state.isAdmin){
+    const dbtn=document.createElement("button");
+    dbtn.className="setterlink admindel";
+    dbtn.textContent="🗑 Delete route";
+    dbtn.onclick=()=>deleteRoute(r.id);
+    foot.appendChild(dbtn);
+  }
+}
+
+async function deleteRoute(routeId){
+  if(!confirm("Delete this route? This hides it from the wall and everyone's view (ratings/ticks kept)."))return;
+  try{
+    const res=await fetch(`/api/routes/${routeId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
+    const d=await res.json();
+    if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
+    if(res.status===403){alert("Admins only.");return}
+    if(!res.ok){alert(d.error||"Couldn't delete that route.");return}
+    closeSheet();
+    await load();
+    alert("Route deleted.");
+  }catch(e){alert("Couldn't delete the route. Check your connection and try again.")}
 }
 function open(r){
   state.cur=r;

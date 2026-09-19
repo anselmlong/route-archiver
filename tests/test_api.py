@@ -343,7 +343,7 @@ def test_me_empty_when_no_ticks(client, api_module):
     _seed_route(api_module)
     raw = sign_init_data(TEST_BOT_TOKEN, user_id=1)
     body = client.get("/api/me", params={"tg": raw}).json()
-    assert body == {"name": "Tester", "routes": [], "count": 0, "grade_pyramid": {}, "hardest_grade": None}
+    assert body == {"name": "Tester", "is_admin": False, "routes": [], "count": 0, "grade_pyramid": {}, "hardest_grade": None}
 
 
 # --------------------------------------------------------------------------- #
@@ -598,3 +598,37 @@ def test_analytics_returns_counts_for_admin(client, api_module):
     assert body["active_users"] == 1
     assert body["events"]["view"] == 1
     assert body["events"]["session"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# DELETE /api/routes/{id} — admin-only removal
+# --------------------------------------------------------------------------- #
+def test_delete_route_requires_auth(client, api_module):
+    route = _seed_route(api_module)
+    r = client.request("DELETE", f"/api/routes/{route['id']}", json={})
+    assert r.status_code == 401
+
+
+def test_delete_route_rejects_non_admin(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=999)
+    r = client.request("DELETE", f"/api/routes/{route['id']}", json={"init_data": raw})
+    assert r.status_code == 403
+
+
+def test_delete_route_soft_deletes_for_admin(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=495290408)  # default admin
+    r = client.request("DELETE", f"/api/routes/{route['id']}", json={"init_data": raw})
+    assert r.status_code == 200
+    assert r.json() == {"deleted": True, "route_id": route["id"]}
+    # soft delete: get_route filters deleted=0, so the route is now invisible
+    assert api_module.storage.get_route(route["id"]) is None
+    active = api_module.storage.list_routes(status="active")
+    assert all(x["id"] != route["id"] for x in active)
+
+
+def test_delete_route_404_when_missing(client, api_module):
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=495290408)
+    r = client.request("DELETE", "/api/routes/99999", json={"init_data": raw})
+    assert r.status_code == 404
