@@ -466,7 +466,8 @@ def test_leaderboard_view_shows_climber_ranking(authed_page):
     authed_page.locator('[data-view="board"]').click()
     authed_page.wait_for_selector(".brow")
     text = authed_page.locator("#board").inner_text()
-    assert "Top climbers" in text
+    # headings render as uppercase micro-labels, so compare case-insensitively
+    assert "top climbers" in text.lower()
     # the leaderboard reports each tick's tg_user_name as stored at tick
     # time ("A" in the fixture), not the display name from the current
     # initData ("Tester") -- a climber's history keeps the name they had
@@ -846,3 +847,41 @@ def test_ungraded_routes_sort_last_in_both_directions(wildcard_live_server):
         pg.select_option("#sort", "easy")
         assert pg.locator(".nm").last.inner_text() == "Mystery Line"
         browser.close()
+
+
+def test_search_is_scoped_to_browse(authed_page):
+    """Regression: the search box sat outside the browse controls, so it
+    stayed on screen in Mine/Leaderboard/Hot while still filtering the browse
+    collection -- one keystroke there swapped browse results into the view
+    without the tab changing."""
+    assert authed_page.locator("#search").is_visible()
+
+    authed_page.locator('[data-view="mine"]').click()
+    authed_page.wait_for_selector("#mineStats .mrow")
+    assert authed_page.locator("#search").is_hidden()
+
+    authed_page.locator('[data-view="board"]').click()
+    authed_page.wait_for_selector(".brow")
+    assert authed_page.locator("#search").is_hidden()
+
+    authed_page.locator('[data-view="browse"]').click()
+    authed_page.wait_for_function("document.querySelectorAll('.card').length === 2")
+    assert authed_page.locator("#search").is_visible()
+
+
+def test_close_button_stays_reachable_after_scrolling_the_sheet(page):
+    """The exit used to sit inside the scrolling content, so on a long route
+    it scrolled away with the photo, leaving only the scrim sliver."""
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.eval_on_selector("#sheet", "el => { el.scrollTop = el.scrollHeight }")
+    page.wait_for_timeout(120)
+
+    box = page.locator("#sheetclose").bounding_box()
+    sheet = page.locator("#sheet").bounding_box()
+    assert box is not None
+    # still pinned near the top edge of the sheet, not scrolled off it
+    assert box["y"] - sheet["y"] < 60
+    page.locator("#sheetclose").click()
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert not page.locator("#sheet").is_visible()
