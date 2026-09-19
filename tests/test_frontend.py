@@ -1280,6 +1280,11 @@ def test_telegram_back_button_is_actually_wired_to_the_unwind(live_server):
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
         pg = browser.new_page()
+        # The real CDN script overwrites window.Telegram (bug 05f3cc5's own
+        # comment at fetch_test warns about), which would clobber our stub
+        # before the page's inline script runs. Abort it so the stub survives
+        # and this can actually assert the real registration wiring.
+        pg.route("**/telegram-web-app.js", lambda r: r.abort())
         pg.add_init_script("""
           window.Telegram = {WebApp: {
             initData: "", initDataUnsafe: {},
