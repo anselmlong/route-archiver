@@ -1,6 +1,4 @@
 """Caption parser + Storage CRUD/ratings/ticks tests."""
-import pathlib
-
 import pytest
 
 from storage import V_ORDER, GradeError, WILD_LOW, parse_caption
@@ -850,7 +848,7 @@ def test_migration_re_reads_the_version_stamp_under_the_write_lock(tmp_path, sto
     assert got == gl("V4")
 
 
-def test_parse_caption_clamps_v17_plus(tmp_path):
+def test_parse_caption_clamps_v17_plus():
     # the grade regex accepts V17+, so the parse table has to hold it too --
     # otherwise the one token the regex matches and the table lacks makes the
     # bot reject the caption instead of clamping it like V17 and V16+
@@ -863,3 +861,48 @@ def test_set_tick_grade_reports_when_there_is_no_tick(storage):
     assert storage.set_tick_grade(r["id"], tg_user_id=7, suggested_grade="V6") is False
     storage.toggle_tick(r["id"], tg_user_id=7, tg_user_name="A")
     assert storage.set_tick_grade(r["id"], tg_user_id=7, suggested_grade="V6") is True
+
+
+def test_startup_waits_out_a_locked_non_wal_database(tmp_path, storage_module):
+    """Switching journal mode takes an exclusive lock and refuses immediately
+    instead of waiting out the busy timeout. A deploy restarts the bot and the
+    API together and each builds a Storage at import, so on a DB not yet in
+    WAL -- a restored backup or a copy -- the second one died here in
+    milliseconds rather than waiting for the first to finish."""
+    import sqlite3
+    import threading
+    import time
+
+    path = tmp_path / "legacy_journal.db"
+    seed = sqlite3.connect(path)
+    seed.execute("CREATE TABLE placeholder (x INTEGER)")
+    seed.commit()
+    assert seed.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal"
+    seed.close()
+
+    # the winner of the race, holding the write lock while it works
+    holder = sqlite3.connect(path, timeout=30)
+    holder.isolation_level = None
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("INSERT INTO placeholder VALUES (1)")
+
+    failed = []
+    started = threading.Event()
+
+    def loser():
+        started.set()
+        try:
+            storage_module.Storage(db_path=path)
+        except BaseException as exc:
+            failed.append(exc)
+
+    thread = threading.Thread(target=loser)
+    thread.start()
+    started.wait(timeout=5)
+    time.sleep(0.8)          # long enough that a non-waiting loser is already dead
+    holder.execute("COMMIT")
+    holder.close()
+    thread.join(timeout=30)
+
+    assert not thread.is_alive(), "second Storage never finished starting"
+    assert not failed, f"startup died instead of waiting: {failed}"

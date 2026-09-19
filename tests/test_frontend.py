@@ -921,8 +921,13 @@ def test_wall_names_are_escaped_in_the_filter_dropdown(hostile_wall_live_server)
         pg.wait_for_selector(".card")
         assert pg.evaluate("window.__wallxss") is None
         assert pg.locator("#wall img").count() == 0
-        # the payload survives as inert text in the option label
+        # the payload survives as inert text in the option label...
         assert "onerror" in pg.locator("#wall").inner_text()
+        # ...and, the part that actually breaks the feature, the option's
+        # value is the whole wall name rather than truncating at the quote,
+        # so selecting it still filters to that wall
+        values = pg.eval_on_selector_all("#wall option", "els => els.map(e => e.value)")
+        assert '\'left"><img src=x onerror="window.__wallxss=1">\'' .strip("'") in values
         browser.close()
 
 
@@ -1137,3 +1142,168 @@ def test_closing_the_sheet_takes_the_photo_with_it(page):
     page.wait_for_selector(".scrim:not(.open)", state="attached")
     # a full-screen photo left floating over the route list would trap the user
     assert page.locator("#lightbox").is_hidden()
+
+
+@pytest.fixture
+def photoless_live_server(tmp_path, monkeypatch):
+    """A route archived without a photo, so /api/photo 404s for it."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "nophoto.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+    api_mod.storage.add_route(name="No Shot", grade="V4",
+                              grade_low=V_ORDER.index("V4"), wall="Left")
+    base_url, server, thread = _boot_server(api_mod.app)
+    yield {"base_url": base_url}
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+def test_a_route_without_a_photo_offers_no_enlarge(photoless_live_server):
+    """Regression: the band still said 'tap to enlarge' and opened a
+    full-screen black rectangle for a route that has no photo at all."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(photoless_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        pg.locator(".card").first.click()
+        pg.wait_for_selector(".scrim.open")
+        pg.wait_for_function("document.querySelector('#shot').classList.contains('nophoto')")
+
+        assert pg.locator(".zoomhint").is_hidden()
+        assert pg.locator("#shot").get_attribute("role") is None
+        pg.locator("#shot").click()
+        pg.wait_for_timeout(150)
+        assert pg.locator("#lightbox").is_hidden()
+        browser.close()
+
+
+def test_the_open_photo_blocks_the_keyboard_from_what_is_underneath(page):
+    """Regression: nothing behind the overlay was inert, so Tab walked onto
+    the tick button hidden under the photo. One blind Tab+Enter un-ticked the
+    route while the screen showed only the image."""
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+
+    assert page.evaluate("document.activeElement && document.activeElement.id") == "lbclose"
+    for _ in range(6):
+        page.keyboard.press("Tab")
+        inside_sheet = page.evaluate(
+            "document.activeElement ? document.querySelector('#sheet').contains(document.activeElement) : false")
+        assert not inside_sheet, "focus reached a control hidden under the photo"
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".lightbox:not(.open)", state="attached")
+    # the controls come back once the photo is gone
+    assert page.evaluate("document.querySelector('#stck').closest('[inert]') === null")
+
+
+def test_a_failed_reload_clears_the_stale_list(live_server):
+    """Regression: load()'s catch showed a retry link but left the old cards
+    on screen and state.routes undefined, so tapping one threw after the
+    server had already stored the write."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+
+        pg.route("**/api/routes*", lambda r: r.fulfill(status=500, body="boom"))
+        pg.evaluate("load()")
+        pg.wait_for_selector("#retry")
+
+        assert pg.locator(".card").count() == 0
+        # a rejected payload is never adopted, so the collection stays an array
+        assert pg.evaluate("Array.isArray(state.routes)") is True
+        # and even if it were not, the lookup returns empty instead of throwing
+        assert pg.evaluate("state.routes = undefined; findRoutes(1).length") == 0
+        browser.close()
+
+
+def test_a_failed_write_does_not_report_into_another_route(authed_page):
+    """Regression: the wrong-route gate was added to the success branch only,
+    so a rejected rating painted a red error under a different route's stars."""
+    authed_page.evaluate("""
+      window.__release = null;
+      const real = window.fetch;
+      window.fetch = (u, o) => String(u).includes('/api/rate/')
+        ? new Promise(done => { window.__release = () => done(new Response(
+            JSON.stringify({error: 'server exploded'}),
+            {status: 500, headers: {'Content-Type': 'application/json'}})); })
+        : real(u, o);
+    """)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.wait_for_function("window.__release !== null")
+
+    authed_page.keyboard.press("Escape")
+    authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
+    authed_page.locator(".card", has_text="Weird").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.evaluate("window.__release()")
+    authed_page.wait_for_timeout(250)
+
+    assert authed_page.locator("#ratesaved").is_hidden()
+
+
+def test_a_collapsed_grade_range_can_still_be_moved(page):
+    """Regression: the z-index swap only rescued the very top of the scale.
+    Collapse the range anywhere else and the thumb painted on top was pinned
+    by the other one, so the list stayed empty with no way to reopen it."""
+    mid = V_ORDER.index("V5")
+    _drag(page, "#max", mid)
+    _drag(page, "#min", mid)
+    assert page.evaluate("[state.min, state.max]") == [mid, mid]
+
+    box = page.locator(".range-wrap").bounding_box()
+    y = box["y"] + box["height"] / 2
+    x = box["x"] + box["width"] * (mid / (len(V_ORDER) - 1))
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] * 0.05, y, steps=12)
+    page.mouse.up()
+
+    # the pair moves instead of jamming, so the filter is never a dead end
+    assert page.evaluate("state.min") < mid
+
+
+def test_telegram_back_button_is_actually_wired_to_the_unwind(live_server):
+    """The sibling test re-registers the handler by hand, so it exercises the
+    unwind logic but not the registration itself. This one installs a stub
+    before the page's own script runs, so the real wiring has to happen."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.add_init_script("""
+          window.Telegram = {WebApp: {
+            initData: "", initDataUnsafe: {},
+            ready(){}, expand(){},
+            BackButton: {
+              show(){window.__bb = true}, hide(){window.__bb = false},
+              onClick(fn){window.__registered = fn},
+            },
+          }};
+        """)
+        pg.goto(live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        assert pg.evaluate("typeof window.__registered") == "function"
+
+        pg.locator(".card", has_text="Crack Line").click()
+        pg.wait_for_selector(".scrim.open")
+        pg.locator("#shot").click()
+        pg.wait_for_selector(".lightbox.open")
+
+        pg.evaluate("window.__registered()")
+        pg.wait_for_selector(".lightbox:not(.open)", state="attached")
+        assert pg.locator("#sheet").is_visible()
+
+        pg.evaluate("window.__registered()")
+        pg.wait_for_selector(".scrim:not(.open)", state="attached")
+        assert pg.evaluate("window.__bb") is False
+        browser.close()

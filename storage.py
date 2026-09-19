@@ -5,6 +5,7 @@ mini-app API (reads), so keep this module free of any telegram/async I/O.
 import re
 import sqlite3
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -248,8 +249,36 @@ class Storage:
     def _connect(self):
         conn = sqlite3.connect(self._db_path, timeout=30)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        self._ensure_wal(conn)
         return conn
+
+    @staticmethod
+    def _ensure_wal(conn):
+        """Put the DB in WAL mode, tolerating a concurrent writer.
+
+        Switching journal mode takes an exclusive lock and, unlike ordinary
+        statements, returns "database is locked" straight away instead of
+        waiting out the connection's busy timeout. A deploy restarts the bot
+        and the API together and each builds a Storage at import, so on a DB
+        not yet in WAL -- a restored backup, a copy, a legacy file -- the
+        second one would die here before ever reaching the migration lock it
+        is supposed to wait on. WAL is a concurrency optimisation rather than
+        a correctness requirement, so retry briefly and then carry on
+        without it; the migration serialises on its own lock either way.
+        """
+        try:
+            if (conn.execute("PRAGMA journal_mode").fetchone()[0] or "").lower() == "wal":
+                return
+        except sqlite3.Error:
+            return
+        for delay in (0, 0.1, 0.25, 0.5, 1.0):
+            if delay:
+                time.sleep(delay)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                return
+            except sqlite3.OperationalError:
+                continue
 
     def _init_schema(self):
         with self._lock, self._connect() as conn:
@@ -399,17 +428,21 @@ class Storage:
         through the legacy scale, so a second pass silently moves every
         climber's alert threshold.
         """
+        if conn.in_transaction:
+            conn.commit()  # nothing of ours should ride along with the schema
         prev_isolation = conn.isolation_level
         conn.isolation_level = None  # take manual control of the transaction
         try:
-            if conn.in_transaction:
-                conn.execute("COMMIT")
             conn.execute("BEGIN IMMEDIATE")  # waits out the other process
             try:
                 self._run_grade_scale_migration(conn)
                 conn.execute("COMMIT")
             except BaseException:
-                conn.execute("ROLLBACK")
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass  # a disk-full or I/O error rolls back on its own,
+                          # and re-raising here would bury the real cause
                 raise
         finally:
             conn.isolation_level = prev_isolation
@@ -421,7 +454,7 @@ class Storage:
         # one statement per distinct grade rather than per row, so a large
         # archive does not hold the write lock for thousands of round trips
         conn.executemany(
-            "UPDATE routes SET grade_low=? WHERE grade=?",
+            "UPDATE routes SET grade_low=? WHERE grade IS ?",
             [(_grade_low_from_display(r["grade"]), r["grade"])
              for r in conn.execute("SELECT DISTINCT grade FROM routes").fetchall()],
         )

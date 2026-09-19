@@ -171,9 +171,14 @@
   /* a route photo is the point of the route, so it is never cropped: the
      band takes its height from the shot itself, capped so the name stays
      above the fold, and a tap opens it full screen */
-  .shot{position:relative;min-height:140px;background:var(--panel-2);
+  .shot{position:relative;min-height:170px;background:var(--panel-2);
     border-radius:var(--r-xl) var(--r-xl) 0 0;overflow:hidden;cursor:zoom-in}
   .shot img{display:block;width:100%;max-height:54vh;object-fit:contain}
+  /* no photo on this route: a neutral tile, and none of the enlarge cues */
+  .shot.nophoto{cursor:default}
+  .shot.nophoto img,.shot.nophoto .zoomhint{display:none}
+  .shot.nophoto::after{content:"No photo";position:absolute;inset:0;display:flex;
+    align-items:center;justify-content:center;color:var(--faint);font-size:12.5px}
   .zoomhint{position:absolute;right:12px;bottom:12px;display:flex;align-items:center;
     gap:6px;padding:6px 10px;border-radius:999px;font-size:11.5px;color:#fff;
     background:rgba(10,12,16,.62);border:1px solid rgba(255,255,255,.14);
@@ -325,9 +330,9 @@
   <button data-view="hot"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.8 2.5c.6 3-1.2 4.4-2.6 5.8C8.5 10 6.8 12 6.8 14.7a5.2 5.2 0 0 0 10.4 0c0-1.8-.8-3.4-1.9-4.7-.3 1.1-.9 1.9-1.8 2.4.6-3.6-.3-7.6-.7-9.9z"/><path d="M12 20.4a2.3 2.3 0 0 0 2.3-2.3c0-1.7-2.3-3.5-2.3-3.5s-2.3 1.8-2.3 3.5a2.3 2.3 0 0 0 2.3 2.3z"/></svg>Hot</button>
 </nav>
 
-<div class="lightbox" id="lightbox">
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Route photo">
   <button class="lbclose" id="lbclose" aria-label="Close photo">&#10005;</button>
-  <img id="lbimg" alt="">
+  <img id="lbimg" alt="Route photo">
 </div>
 
 <div class="scrim" id="scrim"></div>
@@ -335,7 +340,7 @@
   <div class="wrap">
     <div class="sheetbar"><button class="sheetclose" id="sheetclose" aria-label="Close route">&#10005;</button></div>
     <div class="shot" id="shot" role="button" tabindex="0" aria-label="View photo full screen">
-      <img id="simg" alt="">
+      <img id="simg" alt="" onerror="markNoPhoto()">
       <span class="zoomhint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/></svg>Tap to enlarge</span>
     </div>
     <div class="sbody">
@@ -419,6 +424,7 @@ async function load(){
     const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
     const r=await fetch("/api/routes"+q).then(x=>x.json());
     const k=await fetch("/api/meta").then(x=>x.json());
+    if(!r||!Array.isArray(r.routes)||!k||!Array.isArray(k.grades))throw new Error("bad payload");
     state.routes=r.routes; state.grades=k.grades;
     const n=Math.max(0,state.grades.length-1);
     state.min=0; state.max=n;
@@ -430,6 +436,9 @@ async function load(){
     paint();
   }catch(e){
     setSub();
+    // leaving the previous cards up invites taps on a list that is gone
+    $("#grid").innerHTML="";
+    state.curList=[];
     const empty=$("#empty");
     empty.hidden=false;
     empty.innerHTML='Couldn\'t load routes. <a href="#" id="retry" style="color:var(--accent)">Retry</a>';
@@ -464,6 +473,12 @@ function sortList(l){
     case "ticks":  return c.sort((a,b)=>(b.tick_count||0)-(a.tick_count||0)||byNew(a,b));
     default:       return c.sort((a,b)=>key(b,false)-key(a,false)||byNew(a,b));
   }
+}
+
+function flashFor(id,el,msg,bad){
+  // a response that lands after the user moved on must not report anything
+  // into the route that happens to be open now -- success or failure
+  if(state.cur&&state.cur.id===id)flash(el,msg,bad);
 }
 
 function flash(el,msg,bad){
@@ -513,9 +528,10 @@ function findRoutes(id){
   // setter's profile) -- return every copy so a rating/tick updates
   // whichever one is actually on screen
   // an error body (a 404 {detail} or a 401 {error}) carries no routes, so
-  // every collection is shape-checked before it is walked
-  const out=state.routes.filter(x=>x.id===id);
-  for(const c of [state.mine,state.hot,state.setter]){
+  // every collection is shape-checked before it is walked -- including
+  // state itself, whose routes a failed reload can leave undefined
+  const out=[];
+  for(const c of [state,state.mine,state.hot,state.setter]){
     if(c&&Array.isArray(c.routes))out.push(...c.routes.filter(x=>x.id===id));
   }
   return out;
@@ -578,6 +594,7 @@ function updateRangeUI(){
 /* ---- view switching: Browse / Mine / Leaderboard ---- */
 function setView(v){
   if(v===state.view)return;
+  closePhoto();  // never leave a full-screen photo hanging over another view
   state.view=v;
   setSub();
   $("#viewseg").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
@@ -761,14 +778,14 @@ async function rate(id,val){
     const res=await fetch(`/api/rate/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
-    if(!res.ok){flash(slot,d.error||"Couldn't save",true);return}
+    if(!res.ok){flashFor(id,slot,d.error||"Couldn't save",true);return}
     if(d.avg!==undefined)findRoutes(id).forEach(r=>{r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating});
     if(state.view===view)renderGrid(state.curList);
     if(state.cur&&state.cur.id===id){
       refreshSheet();
       flash(slot,d.my_rating?"✓ rating saved":"✓ rating cleared");
     }
-  }catch(e){flash(slot,"Couldn't save — check connection",true)}
+  }catch(e){flashFor(id,slot,"Couldn't save — check connection",true)}
 }
 
 async function tick(id,val){
@@ -778,7 +795,7 @@ async function tick(id,val){
     const res=await fetch(`/api/tick/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
-    if(!res.ok){flash($("#gradesaved"),d.error||"Couldn't save",true);return}
+    if(!res.ok){flashFor(id,$("#gradesaved"),d.error||"Couldn't save",true);return}
     if(d.ticked!==undefined)findRoutes(id).forEach(r=>{
       r.my_tick=d.ticked?1:0;r.tick_count=d.count;
       // un-ticking drops the suggestion server-side and re-ticking starts
@@ -788,18 +805,17 @@ async function tick(id,val){
     });
     if(state.view===view)renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
-  }catch(e){flash($("#gradesaved"),"Couldn\'t save — check connection",true)}
+  }catch(e){flashFor(id,$("#gradesaved"),"Couldn\'t save — check connection",true)}
 }
 
 async function setTickGrade(id){
   const g=$("#stckgrade").value.trim();
   const slot=$("#gradesaved");
   if(!g||!state.initData)return;
-  const wasOpen=state.cur&&state.cur.id===id;
   try{
     const res=await fetch(`/api/tick/${id}/grade`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggested_grade:g,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
-    if(!res.ok){flash(slot,d.error||"Couldn\'t save that grade",true);return}
+    if(!res.ok){flashFor(id,slot,d.error||"Couldn\'t save that grade",true);return}
     // fold the fresh consensus straight back in, so the community-grade line
     // above reflects this suggestion without waiting for a reload
     findRoutes(id).forEach(r=>{
@@ -807,7 +823,7 @@ async function setTickGrade(id){
       r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
     });
     if(state.cur&&state.cur.id===id){refreshSheet();flash(slot,"✓ grade saved")}
-  }catch(e){if(wasOpen&&state.cur&&state.cur.id===id)flash(slot,"Couldn\'t save — check connection",true)}
+  }catch(e){flashFor(id,slot,"Couldn\'t save — check connection",true)}
 }
 
 /* ---- sheet open/refresh ---- */
@@ -878,17 +894,44 @@ async function deleteRoute(routeId){
 }
 function photoOpen(){return $("#lightbox").classList.contains("open")}
 
+function markNoPhoto(){
+  // /api/photo 404s for a route archived without one; without this the band
+  // would still offer "tap to enlarge" and open a full-screen black rectangle
+  $("#shot").classList.add("nophoto");
+  $("#shot").removeAttribute("tabindex");
+  $("#shot").removeAttribute("role");
+}
+
+// everything behind the photo is made inert, so Tab cannot walk onto controls
+// hidden under it -- one blind Tab+Enter used to un-tick the route
+const BEHIND=["header",".wrap#main","#viewseg","#scrim","#sheet"];
+function setBehindInert(on){
+  for(const sel of BEHIND){
+    const el=document.querySelector(sel);
+    if(!el)continue;
+    if(on)el.setAttribute("inert","");
+    else el.removeAttribute("inert");
+  }
+}
+
 function openPhoto(){
   const img=$("#simg");
-  if(!state.cur||!img.getAttribute("src"))return;
+  if(!state.cur||$("#shot").classList.contains("nophoto"))return;
+  if(!img.getAttribute("src")||!img.naturalWidth)return;
   $("#lbimg").src=img.src;
   $("#lightbox").classList.add("open");
+  setBehindInert(true);
+  $("#lbclose").focus();
   tgBack(true);
 }
 
 function closePhoto(){
+  if(!photoOpen())return;
   $("#lightbox").classList.remove("open");
   $("#lbimg").removeAttribute("src");
+  setBehindInert(false);
+  const shot=$("#shot");
+  if(shot.hasAttribute("tabindex"))shot.focus();
   // the sheet is still underneath, so the native back button stays on for it
   tgBack($("#sheet").classList.contains("open"));
 }
@@ -906,6 +949,10 @@ function tgBack(show){
 
 function openRoute(r){
   state.cur=r;
+  const shot=$("#shot");
+  shot.classList.remove("nophoto");
+  shot.setAttribute("tabindex","0");
+  shot.setAttribute("role","button");
   $("#simg").src=`/api/photo/${r.id}`;
   $("#ratesaved").hidden=true;
   $("#gradesaved").hidden=true;
@@ -987,17 +1034,18 @@ async function postComment(routeId){
 async function deleteComment(commentId,routeId){
   const view=state.view;
   try{
-    await fetch(`/api/comments/${commentId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
+    const res=await fetch(`/api/comments/${commentId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
+    if(!res.ok){alert("Couldn't delete that comment.");return}
     bumpCommentCount(routeId,-1,view);
     loadComments(routeId);
   }catch(e){alert("Couldn't delete your comment. Check your connection and try again.")}
 }
 function closeSheet(){
-  if(photoOpen())closePhoto();
   const el=document.activeElement;
   if(el&&$("#sheet").contains(el)&&typeof el.blur==="function")el.blur();
   $("#scrim").classList.remove("open");
   $("#sheet").classList.remove("open");
+  closePhoto();  // after the sheet is marked closed, so back turns fully off
   state.cur=null;
   tgBack(false);
 }
@@ -1027,10 +1075,27 @@ $("#viewseg").querySelectorAll("button").forEach(b=>b.onclick=()=>setView(b.data
 $("#sort").onchange=e=>{state.sort=e.target.value;paint()};
 $("#wall").onchange=e=>{state.wall=e.target.value;paint()};
 $("#search").oninput=e=>{state.search=e.target.value;paint()};
-$("#min").oninput=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI()};
-$("#min").onchange=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI();paint()};
-$("#max").oninput=e=>{let v=+e.target.value;if(v<state.min)v=state.min;state.max=v;e.target.value=v;updateRangeUI()};
-$("#max").onchange=e=>{let v=+e.target.value;if(v<state.min)v=state.min;state.max=v;e.target.value=v;updateRangeUI();paint()};
+// The thumbs push each other rather than stopping dead. Clamping meant that
+// once the two met, the one painted on top was pinned by the other and the
+// range could not be reopened by dragging -- the list just stayed empty.
+function dragMin(v,repaint){
+  state.min=v;
+  if(state.max<v){state.max=v;$("#max").value=v}
+  $("#min").value=v;
+  updateRangeUI();
+  if(repaint)paint();
+}
+function dragMax(v,repaint){
+  state.max=v;
+  if(state.min>v){state.min=v;$("#min").value=v}
+  $("#max").value=v;
+  updateRangeUI();
+  if(repaint)paint();
+}
+$("#min").oninput=e=>dragMin(+e.target.value,false);
+$("#min").onchange=e=>dragMin(+e.target.value,true);
+$("#max").oninput=e=>dragMax(+e.target.value,false);
+$("#max").onchange=e=>dragMax(+e.target.value,true);
 // star selection
 $("#starselect").onclick=e=>{
   if(!state.cur)return;
