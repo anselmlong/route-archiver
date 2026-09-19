@@ -22,10 +22,9 @@
   .sub{color:var(--muted);font-size:12.5px;margin-top:2px}
 
   /* toolbar */
-  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel)}
-  .seg button{border:0;background:transparent;color:var(--muted);padding:8px 13px;font-size:13px;cursor:pointer}
-  .seg button.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .ctl{display:inline-flex;align-items:center;gap:6px;min-width:0}
+  .ctllab{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;flex-shrink:0}
   select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:13.5px}
   .search{width:100%;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13.5px;margin:0 0 10px}
   /* bottom tab bar: sits under the scrim (30) and sheet (31), so an open
@@ -131,6 +130,21 @@
   .cinput{flex:1;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px}
   .cpost{background:var(--accent);color:#151008;border:0;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0}
   .commentcount{color:var(--muted);font-size:11px}
+
+  /* inline write confirmation, shown next to the control that was touched */
+  .saved{font-size:12px;color:var(--tick);white-space:nowrap}
+  .saved.bad{color:#ff6b6b}
+  .saved[hidden]{display:none}
+  .gradewrap{display:inline-flex;align-items:center;gap:6px}
+  .gradewrap.hidden{display:none}
+  .gradelab2{color:var(--muted);font-size:12px;white-space:nowrap}
+
+  /* sheet close: the scrim is only the sliver above a 94vh sheet, so the
+     detail view needs an exit that does not depend on hitting that strip */
+  .sheetclose{position:absolute;top:10px;right:10px;z-index:2;width:38px;height:38px;
+    border-radius:50%;border:1px solid var(--line);background:rgba(8,10,13,.74);
+    color:var(--text);font-size:17px;line-height:1;cursor:pointer;
+    display:flex;align-items:center;justify-content:center}
 </style>
 </head>
 <body>
@@ -144,11 +158,18 @@
 
   <div id="browseControls">
     <div class="toolbar">
-      <div class="seg" id="sortseg">
-        <button data-sort="grade" class="on">Grade</button>
-        <button data-sort="new">New</button>
-      </div>
-      <select id="wall"><option value="">All walls</option></select>
+      <label class="ctl"><span class="ctllab">Sort</span>
+        <select id="sort">
+          <option value="hard">Hardest first</option>
+          <option value="easy">Easiest first</option>
+          <option value="new">Newest</option>
+          <option value="rating">Top rated</option>
+          <option value="ticks">Most sent</option>
+        </select>
+      </label>
+      <label class="ctl"><span class="ctllab">Wall</span>
+        <select id="wall"><option value="">All walls</option></select>
+      </label>
     </div>
 
     <div class="filters">
@@ -180,6 +201,7 @@
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet">
   <div class="wrap">
+    <button class="sheetclose" id="sheetclose" aria-label="Close route">&#10005;</button>
     <img id="simg" alt="">
     <div class="sbody">
       <div class="rg"><span class="g" id="sgrade"></span><span id="swall" hidden></span><span class="retired" id="sretired" hidden>Retired</span></div>
@@ -191,12 +213,17 @@
         <span class="lab">Rate</span>
         <span class="starselect" id="starselect"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></span>
         <span class="avg" id="savg"></span>
+        <span class="saved" id="ratesaved" hidden></span>
       </div>
 
       <div class="tickrow">
         <button class="tickbtn" id="stck">✓ Tick sent</button>
-        <input class="tickgrade hidden" id="stckgrade" placeholder="V?" maxlength="6" inputmode="text">
+        <span class="gradewrap hidden" id="stckgradewrap">
+          <span class="gradelab2">felt like</span>
+          <input class="tickgrade" id="stckgrade" placeholder="V?" maxlength="6" inputmode="text">
+        </span>
         <span class="tickmeta" id="sascent"></span>
+        <span class="saved" id="gradesaved" hidden></span>
       </div>
 
       <div class="comments" id="scomments">
@@ -215,7 +242,7 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const state={routes:[],sort:"grade",wall:"",search:"",min:0,max:1,grades:[],cur:null,initData:"",
+const state={routes:[],sort:"hard",wall:"",search:"",min:0,max:1,grades:[],cur:null,initData:"",
   view:"browse",curList:[],mine:null,board:null,hot:null,setter:null,isAdmin:false};
 
 (function tg(){
@@ -225,6 +252,8 @@ const state={routes:[],sort:"grade",wall:"",search:"",min:0,max:1,grades:[],cur:
     if(window.Telegram.WebApp.initData) state.initData=window.Telegram.WebApp.initData;
     const u=window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user;
     if(u&&u.first_name)$("#sub").textContent="hey "+u.first_name+" · tap a card for details";
+    const bb=window.Telegram.WebApp.BackButton;
+    if(bb&&bb.onClick)try{bb.onClick(closeSheet)}catch(e){}
     // learn whether the caller is an admin (drives the Delete route button)
     if(state.initData){
       fetch("/api/me?tg="+encodeURIComponent(state.initData))
@@ -240,8 +269,8 @@ async function load(){
     const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
     const r=await fetch("/api/routes"+q).then(x=>x.json());
     const k=await fetch("/api/meta").then(x=>x.json());
-    state.routes=r.routes; state.grades=["all",...k.grades];
-    const n=state.grades.length-1;
+    state.routes=r.routes; state.grades=k.grades;
+    const n=Math.max(0,state.grades.length-1);
     state.min=0; state.max=n;
     $("#min").min=0; $("#min").max=n; $("#min").value=0;
     $("#max").min=0; $("#max").max=n; $("#max").value=n;
@@ -263,8 +292,38 @@ function setWallOptions(walls){
   sel.innerHTML='<option value="">All walls</option>'+walls.map(w=>`<option value="${w}">${w}</option>`).join("");
 }
 
-function gi(i){return state.grades[i]}
-function gn(i){const g=gi(i);return g==="all"?"Any":g}
+function gn(i){return state.grades[i]||""}
+
+function gradeFilterActive(){
+  // the range only filters once it is actually narrowed; full span = no filter
+  return state.grades.length>0&&(state.min>0||state.max<state.grades.length-1);
+}
+
+function sortList(l){
+  const byNew=(a,b)=>b.created_at.localeCompare(a.created_at);
+  // ungraded routes have no place on the scale, so they sit at the end of a
+  // grade sort in either direction instead of leading the easiest-first list
+  const key=(r,asc)=>r.grade_low<0?(asc?Infinity:-Infinity):r.grade_low;
+  const c=[...l];
+  switch(state.sort){
+    case "new":    return c.sort(byNew);
+    case "easy":   return c.sort((a,b)=>key(a,true)-key(b,true)||byNew(a,b));
+    case "rating": return c.sort((a,b)=>(b.avg_rating||0)-(a.avg_rating||0)||
+                                        (b.rating_count||0)-(a.rating_count||0)||byNew(a,b));
+    case "ticks":  return c.sort((a,b)=>(b.tick_count||0)-(a.tick_count||0)||byNew(a,b));
+    default:       return c.sort((a,b)=>key(b,false)-key(a,false)||byNew(a,b));
+  }
+}
+
+function flash(el,msg,bad){
+  // inline write confirmation: stays next to the control that was touched,
+  // and doubles as the error slot so a failed write is never silent
+  el.hidden=false;
+  el.textContent=msg;
+  el.className="saved"+(bad?" bad":"");
+  clearTimeout(el._t);
+  el._t=setTimeout(()=>{el.hidden=true},2400);
+}
 
 function stars(d){
   // render star icons for an avg rating (d = avg or null)
@@ -283,12 +342,12 @@ function filtered(){
     const q=state.search.trim().toLowerCase();
     if(q)l=l.filter(r=>r.name.toLowerCase().includes(q)||(r.setter_name||"").toLowerCase().includes(q));
   }
-  const lo=state.min-1, hi=state.max-1;
-  if(lo>=0)l=l.filter(r=>r.grade_low>=lo&&r.grade_low!==-1);
-  if(hi<state.grades.length-2)l=l.filter(r=>r.grade_low<=hi);
-  if(state.sort==="new")l=[...l].sort((a,b)=>b.created_at.localeCompare(a.created_at));
-  else l=[...l].sort((a,b)=>b.grade_low-a.grade_low||b.created_at.localeCompare(a.created_at));
-  return l;
+  if(gradeFilterActive()){
+    // a narrowed range also drops ungraded routes: nothing can say whether a
+    // V? belongs inside VB-V3, so it stays out until the range is cleared
+    l=l.filter(r=>r.grade_low>=state.min&&r.grade_low<=state.max);
+  }
+  return sortList(l);
 }
 
 function paint(){
@@ -339,10 +398,14 @@ function renderGrid(list){
 }
 
 function updateRangeUI(){
-  $("#minLab").textContent=gn(state.min);
-  $("#maxLab").textContent=gn(state.max);
-  $("#rangeLab").textContent=(gn(state.min)==="Any")?"all grades":`${gn(state.min)}–${gn(state.max)}`;
   const n=state.grades.length-1;
+  if(n<0)return;
+  // the rail ends are the scale; the middle label is the live selection
+  $("#minLab").textContent=gn(0);
+  $("#maxLab").textContent=gn(n);
+  $("#rangeLab").textContent=gradeFilterActive()
+    ?`${gn(state.min)}–${gn(state.max)}`
+    :"all grades";
   const pL=(state.min/n)*100, pR=100-(state.max/n)*100;
   $("#dFill").style.left=pL+"%";
   $("#dFill").style.width=(100-pL-pR)+"%";
@@ -401,10 +464,11 @@ function renderMine(){
   const bars=Object.entries(m.grade_pyramid||{})
     .sort((a,b)=>state.grades.indexOf(b[0])-state.grades.indexOf(a[0]));
   const max=Math.max(1,...bars.map(b=>b[1]));
+  const who=esc(m.name||"You");
   $("#mineStats").innerHTML=m.count
-    ?`<div class="mrow"><b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></div>`+
+    ?`<div class="mrow"><b>${who}</b> · <b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></div>`+
       bars.map(([g,c])=>`<div class="pyr"><span class="pg">${esc(g)}</span><div class="pbar"><div style="width:${c/max*100}%"></div></div><span class="pc">${c}</span></div>`).join("")
-    :"";
+    :`<div class="mrow"><b>${who}</b> · no sends logged yet</div>`;
   $("#count").textContent="";
   $("#empty").textContent="No ticks yet — open a route and mark it sent.";
   renderGrid(m.routes);
@@ -522,14 +586,17 @@ function renderBoard(){
 /* ---- sheet buttons ---- */
 async function rate(id,val){
   if(!state.initData){alert("Open via Telegram to rate (one rating per account).");return}
+  const slot=$("#ratesaved");
   try{
     const res=await fetch(`/api/rate/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
-    const d=await res.json();
+    const d=await res.json().catch(()=>({}));
     if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
+    if(!res.ok){flash(slot,d.error||"Couldn't save",true);return}
     if(d.avg!==undefined)findRoutes(id).forEach(r=>{r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating});
     renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
-  }catch(e){alert("Couldn't save your rating. Check your connection and try again.")}
+    flash(slot,d.my_rating?"✓ rating saved":"✓ rating cleared");
+  }catch(e){flash(slot,"Couldn't save — check connection",true)}
 }
 
 async function tick(id,val){
@@ -538,19 +605,33 @@ async function tick(id,val){
     const res=await fetch(`/api/tick/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json();
     if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
-    if(d.ticked!==undefined)findRoutes(id).forEach(r=>{r.my_tick=d.ticked?1:0;r.tick_count=d.count});
+    if(!res.ok){flash($("#gradesaved"),d.error||"Couldn't save",true);return}
+    if(d.ticked!==undefined)findRoutes(id).forEach(r=>{
+      r.my_tick=d.ticked?1:0;r.tick_count=d.count;
+      r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
+    });
     renderGrid(state.curList);
     if(state.cur&&state.cur.id===id)refreshSheet();
-  }catch(e){alert("Couldn't save your tick. Check your connection and try again.")}
+  }catch(e){flash($("#gradesaved"),"Couldn\'t save — check connection",true)}
 }
 
 async function setTickGrade(id){
   const g=$("#stckgrade").value.trim();
+  const slot=$("#gradesaved");
   if(!g||!state.initData)return;
   try{
-    await fetch(`/api/tick/${id}/grade`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggested_grade:g,init_data:state.initData})});
-    findRoutes(id).forEach(r=>r.my_suggested_grade=g);
-  }catch(e){}
+    const res=await fetch(`/api/tick/${id}/grade`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggested_grade:g,init_data:state.initData})});
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok){flash(slot,d.error||"Couldn\'t save that grade",true);return}
+    // fold the fresh consensus straight back in, so the community-grade line
+    // above reflects this suggestion without waiting for a reload
+    findRoutes(id).forEach(r=>{
+      r.my_suggested_grade=g;
+      r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
+    });
+    if(state.cur&&state.cur.id===id)refreshSheet();
+    flash(slot,"✓ grade saved");
+  }catch(e){flash(slot,"Couldn\'t save — check connection",true)}
 }
 
 /* ---- sheet open/refresh ---- */
@@ -573,14 +654,14 @@ function refreshSheet(){
   const sel=$("#starselect");
   [...sel.children].forEach((s,i)=>s.className=(r.my_rating&&i<(r.my_rating))?"on":"");
   // tick state
-  const t=$("#stck"), tg=$("#stckgrade");
+  const t=$("#stck"), tg=$("#stckgrade"), tw=$("#stckgradewrap");
   t.className="tickbtn"+(r.my_tick?" on":"");
   t.textContent=r.my_tick?"✓ Sent":"✓ Tick sent";
   if(r.my_tick){
-    tg.classList.remove("hidden");
+    tw.classList.remove("hidden");
     tg.value=r.my_suggested_grade||r.grade||"V?";
   }else{
-    tg.classList.add("hidden");
+    tw.classList.add("hidden");
     tg.value="";
   }
   const n=r.tick_count||0;
@@ -619,14 +700,25 @@ async function deleteRoute(routeId){
     alert("Route deleted.");
   }catch(e){alert("Couldn't delete the route. Check your connection and try again.")}
 }
+function tgBack(show){
+  // Telegram's native back button is the exit people reach for first inside
+  // a mini-app; it is a no-op in a plain browser, where the ✕ carries it
+  const w=window.Telegram&&window.Telegram.WebApp;
+  if(!w||!w.BackButton)return;
+  try{show?w.BackButton.show():w.BackButton.hide()}catch(e){}
+}
+
 function open(r){
   state.cur=r;
   $("#simg").src=`/api/photo/${r.id}`;
+  $("#ratesaved").hidden=true;
+  $("#gradesaved").hidden=true;
   refreshSheet();
   $("#cinput").value="";
   loadComments(r.id);
   $("#scrim").classList.add("open");
   $("#sheet").classList.add("open");
+  tgBack(true);
 }
 
 /* ---- comments ---- */
@@ -704,6 +796,8 @@ async function deleteComment(commentId,routeId){
 function closeSheet(){
   $("#scrim").classList.remove("open");
   $("#sheet").classList.remove("open");
+  state.cur=null;
+  tgBack(false);
 }
 
 function fmtDate(d){try{const dt=new Date(d.replace(" ","T")+"Z");return dt.toLocaleDateString(undefined,{day:"numeric",month:"short"})}catch(e){return d}}
@@ -711,12 +805,10 @@ function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt
 
 /* ---- wire up ---- */
 $("#scrim").onclick=closeSheet;
+$("#sheetclose").onclick=closeSheet;
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
 $("#viewseg").querySelectorAll("button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
-$("#sortseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
-  state.sort=b.dataset.sort;
-  $("#sortseg").querySelectorAll("button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
-  paint();
-});
+$("#sort").onchange=e=>{state.sort=e.target.value;paint()};
 $("#wall").onchange=e=>{state.wall=e.target.value;paint()};
 $("#search").oninput=e=>{state.search=e.target.value;paint()};
 $("#min").oninput=e=>{let v=+e.target.value;if(v>state.max)v=state.max;state.min=v;e.target.value=v;updateRangeUI()};

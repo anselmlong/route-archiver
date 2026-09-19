@@ -1,5 +1,6 @@
 """FastAPI endpoint tests: auth (signed Telegram initData), CRUD-ish flows,
 and the error paths the api.py hardening pass added."""
+from storage import V_ORDER
 from tests.conftest import TEST_BOT_TOKEN, sign_init_data
 
 
@@ -142,8 +143,8 @@ def test_routes_includes_grade_consensus(client, api_module):
 
 
 def test_routes_filters_by_grade_and_wall(client, api_module):
-    _seed_route(api_module, name="Easy", grade="V1", grade_low=1, wall="Left")
-    _seed_route(api_module, name="Hard", grade="V6", grade_low=7, wall="Right")
+    _seed_route(api_module, name="Easy", grade="V1", grade_low=V_ORDER.index("V1"), wall="Left")
+    _seed_route(api_module, name="Hard", grade="V6", grade_low=V_ORDER.index("V6"), wall="Right")
     r = client.get("/api/routes", params={"grade": "V5"})
     names = [x["name"] for x in r.json()["routes"]]
     assert names == ["Hard"]
@@ -248,9 +249,11 @@ def test_tick_toggle_on_then_off(client, api_module):
     raw = sign_init_data(TEST_BOT_TOKEN, user_id=5)
     r = client.post(f"/api/tick/{route['id']}", json={"suggested_grade": "V5", "init_data": raw})
     assert r.status_code == 200
-    assert r.json() == {"ticked": True, "count": 1, "suggested_grade": "V5"}
+    assert r.json() == {"ticked": True, "count": 1, "suggested_grade": "V5",
+                        "consensus_grade": "V5", "consensus_count": 1}
     r2 = client.post(f"/api/tick/{route['id']}", json={"init_data": raw})
-    assert r2.json() == {"ticked": False, "count": 0, "suggested_grade": None}
+    assert r2.json() == {"ticked": False, "count": 0, "suggested_grade": None,
+                         "consensus_grade": None, "consensus_count": 0}
 
 
 def test_tick_404_for_missing_route(client, api_module):
@@ -277,7 +280,10 @@ def test_tick_grade_updates_existing_tick(client, api_module):
     r = client.put(f"/api/tick/{route['id']}/grade",
                     json={"suggested_grade": "V6", "init_data": raw})
     assert r.status_code == 200
-    assert r.json() == {"ticked": True, "suggested_grade": "V6"}
+    # the write hands back the recomputed consensus so the sheet can show
+    # the suggestion landing without reloading the whole collection
+    assert r.json() == {"ticked": True, "suggested_grade": "V6",
+                        "consensus_grade": "V6", "consensus_count": 1}
 
 
 def test_tick_grade_requires_auth(client, api_module):

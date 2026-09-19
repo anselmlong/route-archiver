@@ -457,6 +457,18 @@ async def cmd_setter(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _threshold_label(min_grade_low):
+    """Describe a subscription threshold in words.
+
+    It is a floor, not a grade. Appending "+" used to say so, but the scale
+    carries real half-steps again, so "V4" + "+" now reads as the V4+ grade
+    and a V4+ threshold would render as "V4++".
+    """
+    if min_grade_low is None or not 0 <= min_grade_low < len(V_ORDER):
+        return "any grade"
+    return f"{V_ORDER[min_grade_low]} and up"
+
+
 async def cmd_notify(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Get a DM when a new route matching your preferences is archived:
     /notify [grade] [wall] | off (no args shows your current status).
@@ -481,11 +493,11 @@ async def cmd_notify(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         sub = storage.get_subscription(user.id)
         if not sub:
             await update.effective_message.reply_text(
-                "You're not subscribed. /notify V4 left for new V4+ routes "
-                "on the left wall, or just /notify for everything."
+                "You're not subscribed. /notify V4 left for new routes of "
+                "V4 and up on the left wall, or just /notify for everything."
             )
             return
-        grade = V_ORDER[sub["min_grade_low"]] + "+" if sub["min_grade_low"] is not None else "any grade"
+        grade = _threshold_label(sub["min_grade_low"])
         wall = sub["wall"] or "any wall"
         await update.effective_message.reply_text(
             f"You're subscribed: {grade} on {wall}. /notify off to stop."
@@ -506,7 +518,7 @@ async def cmd_notify(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if canon:
                 wall = canon
     storage.subscribe(user.id, chat.id, min_grade_low=min_grade_low, wall=wall)
-    grade_label = V_ORDER[min_grade_low] + "+" if min_grade_low is not None else "any grade"
+    grade_label = _threshold_label(min_grade_low)
     wall_label = wall or "any wall"
     await update.effective_message.reply_text(
         f"✅ Subscribed: {grade_label} on {wall_label}. /notify off to stop."

@@ -15,18 +15,29 @@ DB_PATH = Path(__file__).parent / "data" / "routes.db"
 # cap is V8+ (the single remaining half-step). Wildcard routes (V? / V) are NOT
 # in this scale — they get grade_low -1 below everything.
 V_ORDER = [
-    "VB", "V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V8+",
+    "VB", "V0", "V0+", "V1", "V1+", "V2", "V2+", "V3", "V3+",
+    "V4", "V4+", "V5", "V5+", "V6", "V6+", "V7", "V7+", "V8", "V8+",
 ]
 _V_IDX = {g: i for i, g in enumerate(V_ORDER)}
 MAX_IDX = _V_IDX["V8+"]  # anything harder than this gets clamped to V8+
 WILD_LOW = -1  # sort index for V? / V wildcard routes
 
-# fuller accepted scale for parsing; grades harder than V8+ clamp down to V8+
-_FULL = [
+# The 11-step scale this DB used between the half-step drop and its restore.
+# Only needed to remap subscription thresholds, which store a bare index with
+# no display grade to recompute from. See _migrate_grade_scale().
+_LEGACY_V_ORDER = [
     "VB", "V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V8+",
-    "V9", "V10", "V11", "V12", "V13", "V14", "V15", "V16", "V17",
+]
+
+# fuller accepted scale for parsing; grades harder than V8+ clamp down to V8+
+_FULL = V_ORDER + [
+    "V9", "V9+", "V10", "V10+", "V11", "V11+", "V12", "V12+", "V13", "V13+",
+    "V14", "V14+", "V15", "V15+", "V16", "V16+", "V17",
 ]
 _FULL_IDX = {g: i for i, g in enumerate(_FULL)}
+
+# bumped whenever grade_low indices change meaning; drives _migrate_grade_scale
+SCHEMA_VERSION = 2
 
 # canonical wall sections (Left / Middle / Right) + common aliases
 WALL_ALIASES = {
@@ -62,23 +73,25 @@ def _norm_grade(s: str) -> str:
 
 
 def _norm_one(p: str) -> str:
-    """Normalize a single grade part: prefix V and strip half-steps.
-    V8+ is the intended max (nobody at NUS realistically climbs past it), so it
-    is the ONE half-step that survives: 'V4+'->'V4', 'V7+'->'V7', 'V8+'->'V8+'.
+    """Normalize a single grade part: prefix V, keep the half-step.
+
+    'v4+'->'V4+', '4'->'V4', 'vB'->'VB'. The scale carries every half-step
+    from V0+ to V8+, so the plus is part of the grade and is preserved. 'VB+'
+    is the one exception: there is no half-step below V0, so it folds to VB.
     """
     p = p.strip()
     if p and not p.startswith("V"):
         p = "V" + p
-    if p == "V8+":
-        return p
-    return p.rstrip("+")
+    if p == "VB+":
+        return "VB"
+    return p
 
 
 def _normalize_grade_token(tok: str) -> str:
     """Turn a raw grade token into a canonical form with V on every side.
 
-    Half-steps are stripped below the top (V4+ -> V4); V8+ is kept. Range sides
-    get the same treatment: 'V3-4', 'V3/V4', 'v4+' -> 'V3-V4'/'V3-V4'/'V4'.
+    Half-steps are preserved. Range sides each get a V prefix:
+    'V3-4', 'V3/V4', 'v4+' -> 'V3-V4' / 'V3-V4' / 'V4+'.
     """
     parts = re.split(r"[-/–]", tok)
     out = [_norm_one(p) for p in parts]
@@ -129,6 +142,22 @@ def _grade_low_from_free_text(raw):
     except GradeError:
         return None
     return grade_low
+
+
+def _grade_low_from_display(display):
+    """Sort index for a grade display string already stored in the DB.
+
+    Tolerant by design: it runs over historical rows during the scale
+    migration, so anything unparseable degrades to the wildcard index
+    rather than raising and blocking startup.
+    """
+    d = (display or "").strip().upper()
+    if not d or d in ("V?", "V"):
+        return WILD_LOW
+    try:
+        return _parse_grade_token(d)[1]
+    except (GradeError, KeyError):
+        return WILD_LOW
 
 
 def _norm_wall(w):
@@ -345,6 +374,47 @@ class Storage:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON events(tg_user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_day ON events(created_at)")
+            self._migrate_grade_scale(conn)
+
+    def _migrate_grade_scale(self, conn):
+        """Re-index stored grades after a change to V_ORDER.
+
+        grade_low is an index into V_ORDER, so restoring the half-steps
+        shifts what every stored index means. Routes and ticks are recomputed
+        from the display grade they kept alongside it. Subscriptions store a
+        bare threshold index with no display to recompute from, so they are
+        remapped through the scale that was in effect when they were written.
+
+        Note: half-steps flattened by the old parser are gone from the
+        display too, so a route archived as V4+ back then stays V4 here.
+        Only routes captioned after this migration carry the plus.
+        """
+        if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+            return
+        for row in conn.execute("SELECT id, grade FROM routes").fetchall():
+            conn.execute(
+                "UPDATE routes SET grade_low=? WHERE id=?",
+                (_grade_low_from_display(row["grade"]), row["id"]),
+            )
+        for row in conn.execute(
+            "SELECT id, suggested_grade FROM ticks "
+            "WHERE suggested_grade IS NOT NULL"
+        ).fetchall():
+            conn.execute(
+                "UPDATE ticks SET suggested_grade_low=? WHERE id=?",
+                (_grade_low_from_free_text(row["suggested_grade"]), row["id"]),
+            )
+        for row in conn.execute(
+            "SELECT id, min_grade_low FROM subscriptions "
+            "WHERE min_grade_low IS NOT NULL"
+        ).fetchall():
+            old = row["min_grade_low"]
+            label = _LEGACY_V_ORDER[old] if 0 <= old < len(_LEGACY_V_ORDER) else None
+            conn.execute(
+                "UPDATE subscriptions SET min_grade_low=? WHERE id=?",
+                (_V_IDX.get(label, 0) if label else None, row["id"]),
+            )
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     # ---- usage analytics ------------------------------------------------
     def track(self, kind: str, tg_user_id=None, route_id=None, payload=None):
@@ -641,8 +711,10 @@ class Storage:
                 )
                 ticked = True
         count = self._tick_count(route_id)
+        consensus_grade, consensus_count = self.route_consensus(route_id)
         return {"ticked": ticked, "count": count,
-                "suggested_grade": None if not ticked else (suggested_grade or "").strip()}
+                "suggested_grade": None if not ticked else (suggested_grade or "").strip(),
+                "consensus_grade": consensus_grade, "consensus_count": consensus_count}
 
     def set_tick_grade(self, route_id, tg_user_id, suggested_grade):
         """Update the suggested grade on an existing tick."""
@@ -940,6 +1012,23 @@ class Storage:
                 consensus_values.get(rid, [])
             )
         return routes
+
+    def route_consensus(self, route_id):
+        """(consensus_grade, consensus_count) for a single route.
+
+        Same median as the batch path in attach_ratings_and_ticks, but for
+        one route, so a write can hand the caller a fresh consensus instead
+        of making the client reload the whole collection to see its own
+        suggestion land.
+        """
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT suggested_grade_low FROM ticks "
+                "WHERE route_id=? AND suggested_grade_low IS NOT NULL "
+                "ORDER BY suggested_grade_low",
+                (route_id,),
+            ).fetchall()
+        return self._consensus_from_values([r["suggested_grade_low"] for r in rows])
 
     @staticmethod
     def _consensus_from_values(values):

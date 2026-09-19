@@ -477,8 +477,22 @@ def test_cmd_notify_no_args_shows_current_subscription(bot_module):
     msg = FakeMessage()
     run(bot_module.cmd_notify(FakeUpdate(user=user, message=msg, chat=chat), FakeCtx(args=[])))
     text = msg.replies[0]["text"]
-    assert "V4+" in text
+    # a threshold is a floor, described in words -- "V4+" would now name the
+    # half-step grade instead of "V4 and harder"
+    assert "V4 and up" in text
     assert "Left" in text
+
+
+def test_cmd_notify_half_step_threshold_is_not_double_plussed(bot_module):
+    chat = FakeChat(id=NON_ADMIN_ID, type="private")
+    user = FakeUser(NON_ADMIN_ID)
+    run(bot_module.cmd_notify(FakeUpdate(user=user, message=FakeMessage(), chat=chat),
+                               FakeCtx(args=["V4+"])))
+    msg = FakeMessage()
+    run(bot_module.cmd_notify(FakeUpdate(user=user, message=msg, chat=chat), FakeCtx(args=[])))
+    text = msg.replies[0]["text"]
+    assert "V4+ and up" in text
+    assert "V4++" not in text
 
 
 def test_cmd_notify_off_unsubscribes(bot_module):

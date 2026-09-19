@@ -11,6 +11,7 @@ import pytest
 import uvicorn
 from playwright.sync_api import sync_playwright
 
+from storage import V_ORDER
 from tests.conftest import TEST_BOT_TOKEN, sign_init_data
 
 CHROMIUM_PATH = "/opt/pw-browsers/chromium"
@@ -62,19 +63,19 @@ def live_server(tmp_path, monkeypatch):
     photo.write_bytes(_PNG_1PX)
 
     s = api_mod.storage
-    r1 = s.add_route(name="Crack Line", grade="V4", grade_low=5, wall="Left",
+    r1 = s.add_route(name="Crack Line", grade="V4", grade_low=V_ORDER.index("V4"), wall="Left",
                       description="crimpy start", photo_path=str(photo))
     # hostile setter_name but NO setter_id: the strip renders the name (so
     # list-level escaping is exercised) while leaderboard_setters -- which
     # groups on setter_id -- still sees an empty setter board
-    r2 = s.add_route(name='Weird "Name" & <tag>', grade="V6", grade_low=7, wall="Right",
+    r2 = s.add_route(name='Weird "Name" & <tag>', grade="V6", grade_low=V_ORDER.index("V6"), wall="Right",
                       description="<script>window.__xss=1</script>",
                       setter_name='Eve <img src=x onerror="window.__xss=1">',
                       photo_path=str(photo))
     s.set_rating(r1["id"], tg_user_id=1, tg_user_name="A", value=5)
     s.toggle_tick(r1["id"], tg_user_id=1, tg_user_name="A", suggested_grade="V4")
 
-    r3 = s.add_route(name="Stripped Slab", grade="V2", grade_low=2, wall="Left",
+    r3 = s.add_route(name="Stripped Slab", grade="V2", grade_low=V_ORDER.index("V2"), wall="Left",
                       photo_path=str(photo))
     s.toggle_tick(r3["id"], tg_user_id=1, tg_user_name="A")
     s.retire_route(r3["id"])
@@ -245,15 +246,45 @@ def test_search_filters_by_setter_name(setter_live_server):
         browser.close()
 
 
-def test_grade_range_slider_filters(page):
-    # push the min-grade thumb up past V4 (index of V4 in [all,VB,V0..V8+])
+def _drag(page, which, index):
     page.eval_on_selector(
-        "#min",
-        "el => { el.value = 8; el.dispatchEvent(new Event('input')); "
-        "el.dispatchEvent(new Event('change')); }",
+        which,
+        "el => { el.value = %d; el.dispatchEvent(new Event('input')); "
+        "el.dispatchEvent(new Event('change')); }" % index,
     )
+
+
+def test_grade_range_slider_filters(page):
+    # push the min thumb to V5, above Crack Line (V4) but below Weird (V6)
+    _drag(page, "#min", V_ORDER.index("V5"))
     assert page.locator(".card").count() == 1
     assert page.locator(".nm").first.inner_text() != "Crack Line"
+
+
+def test_grade_range_label_matches_what_is_actually_filtered(page):
+    """Regression: the label read "all grades" whenever the min thumb sat at
+    its floor, even with an upper bound clamped down hiding routes."""
+    assert page.locator("#rangeLab").inner_text() == "all grades"
+    assert page.locator(".card").count() == 2
+
+    _drag(page, "#max", V_ORDER.index("V5"))
+    # V6 is now filtered out, so the label must stop claiming otherwise
+    assert page.locator(".card").count() == 1
+    assert page.locator("#rangeLab").inner_text() != "all grades"
+    assert "V5" in page.locator("#rangeLab").inner_text()
+
+
+def test_grade_range_at_its_floor_is_not_an_empty_filter(page):
+    """Regression: the scale used to carry a synthetic "all" slot at index 0,
+    so dragging max to the bottom filtered for a grade nothing could hold and
+    emptied the list while the label still said "all grades"."""
+    _drag(page, "#max", 0)
+    _drag(page, "#min", 0)
+    # the floor of the scale is VB, a real grade, not a hole
+    assert page.locator("#rangeLab").inner_text() == "VB\u2013VB"
+    assert page.locator("#empty").is_visible()
+    _drag(page, "#max", len(V_ORDER) - 1)
+    assert page.locator(".card").count() == 2
 
 
 def test_load_failure_shows_retry_and_recovers(live_server):
@@ -284,13 +315,19 @@ def test_load_failure_shows_retry_and_recovers(live_server):
         browser.close()
 
 
-def test_sort_toggle_switches_active_button(page):
-    grade_btn = page.locator('[data-sort="grade"]')
-    new_btn = page.locator('[data-sort="new"]')
-    assert "on" in grade_btn.get_attribute("class")
-    new_btn.click()
-    assert "on" in new_btn.get_attribute("class")
-    assert "on" not in grade_btn.get_attribute("class")
+def test_sort_control_is_labelled_and_reorders_the_list(page):
+    """The old segmented pair painted its selected button the same colour as
+    the strip behind it, so the active sort was invisible. A labelled select
+    shows its own state."""
+    assert page.locator("#sort").input_value() == "hard"
+    # hardest first: V6 above V4
+    assert page.locator(".nm").first.inner_text().startswith("Weird")
+
+    page.select_option("#sort", "easy")
+    assert page.locator(".nm").first.inner_text() == "Crack Line"
+
+    page.select_option("#sort", "hard")
+    assert page.locator(".nm").first.inner_text().startswith("Weird")
 
 
 def test_opening_card_shows_detail_sheet(page):
@@ -662,3 +699,150 @@ def test_comment_rejected_when_over_500_chars_shows_alert(authed_page):
     authed_page.wait_for_timeout(150)
     assert dialog_messages
     assert "No comments yet" in authed_page.locator("#clist").inner_text()
+
+
+# --------------------------------------------------------------------------- #
+# leaving the detail sheet
+# --------------------------------------------------------------------------- #
+def test_close_button_exits_the_detail_sheet(page):
+    """The sheet can stand 94vh tall, leaving the scrim a sliver at the top,
+    so tapping the backdrop was a near-impossible exit on a phone."""
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#sheetclose").click()
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert not page.locator("#sheet").is_visible()
+
+
+def test_escape_closes_the_detail_sheet(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert not page.locator("#sheet").is_visible()
+
+
+def test_telegram_back_button_tracks_the_sheet(page):
+    """Inside Telegram the native back button is the exit people reach for,
+    so it has to appear with the sheet and go away with it."""
+    page.evaluate(
+        "window.Telegram={WebApp:{BackButton:{"
+        "show(){window.__bb=true},hide(){window.__bb=false}}}}"
+    )
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    assert page.evaluate("window.__bb") is True
+    page.locator("#sheetclose").click()
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert page.evaluate("window.__bb") is False
+
+
+# --------------------------------------------------------------------------- #
+# write confirmation
+# --------------------------------------------------------------------------- #
+def test_rating_shows_an_inline_confirmation(authed_page):
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.wait_for_selector("#ratesaved:not([hidden])")
+    assert "saved" in authed_page.locator("#ratesaved").inner_text()
+
+
+def test_grade_suggestion_confirms_and_refreshes_the_consensus(authed_page):
+    """Regression: submitting a suggested grade wrote to the server and
+    changed nothing on screen -- no confirmation, and the community-grade
+    line above it stayed stale until a full reload."""
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    # tg_user_id=1 already ticked this route suggesting V4
+    assert "V4" in authed_page.locator("#sconsensus").inner_text()
+
+    authed_page.eval_on_selector(
+        "#stckgrade",
+        "el => { el.value = 'V6'; el.dispatchEvent(new Event('change')); }",
+    )
+    authed_page.wait_for_selector("#gradesaved:not([hidden])")
+    assert "saved" in authed_page.locator("#gradesaved").inner_text()
+    # the consensus line reflects the new suggestion without a reload
+    assert "V6" in authed_page.locator("#sconsensus").inner_text()
+
+
+def test_failed_rating_surfaces_an_error_instead_of_going_quiet(authed_page):
+    authed_page.route("**/api/rate/**",
+                      lambda route: route.fulfill(status=500, body='{"error":"boom"}'))
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.wait_for_selector("#ratesaved:not([hidden])")
+    assert "bad" in authed_page.locator("#ratesaved").get_attribute("class")
+
+
+def test_mine_header_names_the_climber(authed_page):
+    """The endpoint always returned the caller's name; the view never used
+    it, so the page never said whose logbook it was."""
+    authed_page.locator('[data-view="mine"]').click()
+    authed_page.wait_for_selector("#mineStats .mrow")
+    assert "Tester" in authed_page.locator("#mineStats").inner_text()
+
+
+# --------------------------------------------------------------------------- #
+# ungraded (V?) routes under the grade filter
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def wildcard_live_server(tmp_path, monkeypatch):
+    """A live server holding one ungraded route alongside a graded one."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "wildcard_test.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+    photo = tmp_path / "route.png"
+    photo.write_bytes(_PNG_1PX)
+
+    s = api_mod.storage
+    s.add_route(name="Graded Line", grade="V4", grade_low=V_ORDER.index("V4"),
+                wall="Left", photo_path=str(photo))
+    s.add_route(name="Mystery Line", grade="V?", grade_low=storage_mod.WILD_LOW,
+                wall="Left", photo_path=str(photo))
+
+    base_url, server, thread = _boot_server(api_mod.app)
+    yield {"base_url": base_url}
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+def test_ungraded_routes_show_until_the_range_is_narrowed(wildcard_live_server):
+    """Regression: an ungraded route used to vanish the moment the min thumb
+    moved, yet survive an upper bound -- inconsistent in both directions."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(wildcard_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        assert pg.locator(".card").count() == 2
+
+        # an upper bound is a narrowed range, so the ungraded route drops out
+        _drag(pg, "#max", V_ORDER.index("V5"))
+        names = pg.locator(".nm").all_inner_texts()
+        assert names == ["Graded Line"]
+
+        # clearing the range brings it back
+        _drag(pg, "#max", len(V_ORDER) - 1)
+        assert pg.locator(".card").count() == 2
+        browser.close()
+
+
+def test_ungraded_routes_sort_last_in_both_directions(wildcard_live_server):
+    """An ungraded route has no place on the scale, so it belongs at the end
+    of a grade sort either way, never leading the easiest-first list."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page()
+        pg.goto(wildcard_live_server["base_url"] + "/")
+        pg.wait_for_selector(".card")
+        assert pg.locator(".nm").last.inner_text() == "Mystery Line"
+
+        pg.select_option("#sort", "easy")
+        assert pg.locator(".nm").last.inner_text() == "Mystery Line"
+        browser.close()
