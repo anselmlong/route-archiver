@@ -20,7 +20,8 @@ they just keep posting route pics.
   by a grade range and wall section; tap a route for the full photo +
   setter name, and leave via the ✕, the Telegram back button or the
   backdrop. The photo is shown whole rather than cropped, and tapping it
-  opens it full screen with its own ✕.
+  opens it full screen with its own ✕, where it can be pinched, panned or
+  double-tapped to zoom in on a single hold.
 - **Admin CRUD** — admins can edit/delete routes from the inline buttons on the
   archived confirmation, or `/routes` to list them.
 - **Route lifecycle** — spray wall routes get physically stripped and re-set,

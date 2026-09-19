@@ -1307,3 +1307,180 @@ def test_telegram_back_button_is_actually_wired_to_the_unwind(live_server):
         pg.wait_for_selector(".scrim:not(.open)", state="attached")
         assert pg.evaluate("window.__bb") is False
         browser.close()
+
+
+# --------------------------------------------------------------------------- #
+# pinch / pan / double-tap zoom in the full-screen photo
+# --------------------------------------------------------------------------- #
+def _real_png(path, w, h):
+    """A PNG with actual dimensions -- the shared fixture's 1x1 pixel lays out
+    as a 1x1 box, which is useless for testing zoom and panning."""
+    import struct
+    import zlib
+
+    rows = []
+    for y in range(h):
+        pixels = bytearray()
+        for x in range(w):
+            pixels += bytes(((x * 7) % 256, (y * 5) % 256, 128))
+        rows.append(b"\x00" + bytes(pixels))
+
+    def chunk(tag, data):
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    path.write_bytes(b"\x89PNG\r\n\x1a\n"
+                     + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(b"".join(rows)))
+                     + chunk(b"IEND", b""))
+
+
+@pytest.fixture
+def zoom_page(tmp_path, monkeypatch):
+    """A live server with one route carrying a genuinely large photo, and a
+    page already sitting on its open full-screen view."""
+    monkeypatch.setenv("BOT_TOKEN", TEST_BOT_TOKEN)
+    import api as api_mod
+    import storage as storage_mod
+
+    api_mod.storage = storage_mod.Storage(db_path=tmp_path / "zoom.db")
+    api_mod.BOT_TOKEN = TEST_BOT_TOKEN
+    photo = tmp_path / "big.png"
+    _real_png(photo, 600, 800)
+    api_mod.storage.add_route(name="Big Shot", grade="V4",
+                              grade_low=V_ORDER.index("V4"), wall="Left",
+                              photo_path=str(photo))
+    base_url, server, thread = _boot_server(api_mod.app)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
+        pg = browser.new_page(viewport={"width": 390, "height": 844})
+        pg.goto(base_url + "/")
+        pg.wait_for_selector(".card")
+        pg.locator(".card").first.click()
+        pg.wait_for_selector(".scrim.open")
+        pg.locator("#shot").click()
+        pg.wait_for_selector(".lightbox.open")
+        yield pg
+        browser.close()
+
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+def _pinch(pg, from_gap, to_gap, steps=6):
+    """Two fingers on the photo, spreading (or closing) about its centre."""
+    pg.evaluate("""([fromGap, toGap, steps]) => {
+      const box = document.querySelector('#lightbox');
+      const r = box.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const send = (type, id, x, y) => box.dispatchEvent(
+        new PointerEvent(type, {pointerId: id, clientX: x, clientY: y,
+                                bubbles: true, cancelable: true}));
+      send('pointerdown', 1, cx - fromGap / 2, cy);
+      send('pointerdown', 2, cx + fromGap / 2, cy);
+      for (let i = 1; i <= steps; i++) {
+        const gap = fromGap + (toGap - fromGap) * (i / steps);
+        send('pointermove', 1, cx - gap / 2, cy);
+        send('pointermove', 2, cx + gap / 2, cy);
+      }
+      send('pointerup', 1, cx - toGap / 2, cy);
+      send('pointerup', 2, cx + toGap / 2, cy);
+    }""", [from_gap, to_gap, steps])
+
+
+def test_pinching_zooms_the_photo(zoom_page):
+    assert zoom_page.evaluate("zoom.scale") == 1
+    _pinch(zoom_page, 100, 300)
+    assert zoom_page.evaluate("zoom.scale") == pytest.approx(3.0, abs=0.2)
+    assert "zoomed" in zoom_page.locator("#lightbox").get_attribute("class")
+
+    _pinch(zoom_page, 300, 100)
+    assert zoom_page.evaluate("zoom.scale") == pytest.approx(1.0, abs=0.2)
+
+
+def test_pinching_is_clamped_at_both_ends(zoom_page):
+    _pinch(zoom_page, 20, 900)
+    assert zoom_page.evaluate("zoom.scale") <= 6.0
+    _pinch(zoom_page, 900, 10)
+    assert zoom_page.evaluate("zoom.scale") >= 1.0
+
+
+def test_double_tap_toggles_a_close_up(zoom_page):
+    zoom_page.locator("#lbimg").dblclick()
+    assert zoom_page.evaluate("zoom.scale") > 1.5
+    zoom_page.locator("#lbimg").dblclick()
+    assert zoom_page.evaluate("zoom.scale") == pytest.approx(1.0, abs=0.01)
+
+
+def test_panning_a_zoomed_photo_is_bounded(zoom_page):
+    _pinch(zoom_page, 100, 400)
+    assert zoom_page.evaluate("zoom.scale") > 2
+
+    box = zoom_page.locator("#lightbox").bounding_box()
+    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    zoom_page.mouse.move(cx, cy)
+    zoom_page.mouse.down()
+    zoom_page.mouse.move(cx, cy - 4000, steps=10)   # drag far past the edge
+    zoom_page.mouse.up()
+
+    # the photo moved, but never off-screen: the offset stops at the overflow
+    scale, off = zoom_page.evaluate("[zoom.scale, zoom.y]")
+    img_h = zoom_page.evaluate("document.querySelector('#lbimg').offsetHeight")
+    limit = max(0, (img_h * scale - box["height"]) / 2)
+    assert off < 0
+    assert abs(off) <= limit + 1
+
+
+def test_the_photo_itself_is_not_a_close_button(zoom_page):
+    """It is an interactive surface now: you have to be able to put a finger
+    on it to pinch without the viewer vanishing underneath you."""
+    zoom_page.locator("#lbimg").click()
+    zoom_page.wait_for_timeout(150)
+    assert zoom_page.locator("#lightbox").is_visible()
+
+    zoom_page.locator("#lbclose").click()
+    zoom_page.wait_for_selector(".lightbox:not(.open)", state="attached")
+
+
+def test_reopening_a_photo_starts_back_at_fit(zoom_page):
+    _pinch(zoom_page, 100, 350)
+    assert zoom_page.evaluate("zoom.scale") > 2
+    zoom_page.locator("#lbclose").click()
+    zoom_page.wait_for_selector(".lightbox:not(.open)", state="attached")
+
+    zoom_page.locator("#shot").click()
+    zoom_page.wait_for_selector(".lightbox.open")
+    assert zoom_page.evaluate("zoom.scale") == 1
+    assert zoom_page.evaluate("[zoom.x, zoom.y]") == [0, 0]
+
+
+def test_tapping_the_letterbox_still_dismisses(zoom_page):
+    """The photo is contained, so there is dark space beside it. Tapping that
+    closes, the way a lightbox backdrop should -- but only at fit scale, so a
+    stray thumb while inspecting a zoomed photo does not throw it away."""
+    box = zoom_page.locator("#lightbox").bounding_box()
+    img = zoom_page.locator("#lbimg").bounding_box()
+    gap_y = img["y"] / 2                      # above the photo, inside the overlay
+    assert gap_y > 4, "no letterbox to tap in this layout"
+
+    _pinch(zoom_page, 100, 350)
+    zoom_page.mouse.click(box["x"] + box["width"] / 2, gap_y)
+    zoom_page.wait_for_timeout(150)
+    assert zoom_page.locator("#lightbox").is_visible(), "closed while zoomed in"
+
+    _pinch(zoom_page, 350, 60)                 # back to fit
+    assert zoom_page.evaluate("zoom.scale") == pytest.approx(1.0, abs=0.05)
+    zoom_page.wait_for_timeout(350)            # clear of any double-tap window
+    zoom_page.mouse.click(box["x"] + box["width"] / 2, gap_y)
+    zoom_page.wait_for_selector(".lightbox:not(.open)", state="attached")
+
+
+def test_keyboard_can_zoom_and_reset(zoom_page):
+    zoom_page.keyboard.press("+")
+    assert zoom_page.evaluate("zoom.scale") > 1.2
+    zoom_page.keyboard.press("0")
+    assert zoom_page.evaluate("zoom.scale") == 1
+    # Escape still closes rather than being swallowed by the zoom shortcuts
+    zoom_page.keyboard.press("Escape")
+    zoom_page.wait_for_selector(".lightbox:not(.open)", state="attached")

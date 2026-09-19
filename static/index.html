@@ -188,9 +188,20 @@
 
   /* full-screen photo, above the sheet */
   .lightbox{position:fixed;inset:0;z-index:40;display:none;background:#05070a;
-    align-items:center;justify-content:center;cursor:zoom-out}
+    align-items:center;justify-content:center;overflow:hidden;touch-action:none}
   .lightbox.open{display:flex;animation:fade .14s ease}
-  .lightbox img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+  .lightbox img{max-width:100%;max-height:100%;object-fit:contain;display:block;
+    transform-origin:center center;cursor:zoom-in;-webkit-user-select:none;user-select:none;
+    -webkit-user-drag:none}
+  .lightbox.zoomed img{cursor:grab}
+  .lightbox.panning img{cursor:grabbing}
+  .zoomlevel{position:fixed;z-index:41;left:50%;transform:translateX(-50%);
+    bottom:max(18px,env(safe-area-inset-bottom));padding:6px 12px;border-radius:999px;
+    font-size:12px;font-variant-numeric:tabular-nums;color:#fff;pointer-events:none;
+    background:rgba(10,12,16,.7);border:1px solid rgba(255,255,255,.14);
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+    opacity:0;transition:opacity .18s}
+  .lightbox.zoomed .zoomlevel{opacity:1}
   .lbclose{position:fixed;z-index:41;top:max(14px,env(safe-area-inset-top));right:14px;
     width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.18);
     background:rgba(10,12,16,.7);color:#fff;font-size:17px;line-height:1;cursor:pointer;
@@ -333,6 +344,7 @@
 <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Route photo">
   <button class="lbclose" id="lbclose" aria-label="Close photo">&#10005;</button>
   <img id="lbimg" alt="Route photo">
+  <span class="zoomlevel" id="zoomlevel">1.0&times;</span>
 </div>
 
 <div class="scrim" id="scrim"></div>
@@ -914,11 +926,123 @@ function setBehindInert(on){
   }
 }
 
+/* ---- full-screen photo: pinch, pan, double-tap zoom ---- */
+const ZOOM_MIN=1, ZOOM_MAX=6, ZOOM_STEP=2.5;
+const zoom={scale:1,x:0,y:0,pointers:new Map(),baseDist:0,baseScale:1,
+  panFrom:null,moved:false,lastTap:0,onImage:false};
+
+function applyZoom(){
+  const img=$("#lbimg"), box=$("#lightbox");
+  // the photo is letterboxed, so pan is bounded by how far it actually
+  // overflows the screen at this scale -- you can never drag it off-view
+  const ow=img.offsetWidth*zoom.scale, oh=img.offsetHeight*zoom.scale;
+  const maxX=Math.max(0,(ow-box.clientWidth)/2);
+  const maxY=Math.max(0,(oh-box.clientHeight)/2);
+  zoom.x=Math.min(maxX,Math.max(-maxX,zoom.x));
+  zoom.y=Math.min(maxY,Math.max(-maxY,zoom.y));
+  img.style.transform=`translate(${zoom.x}px,${zoom.y}px) scale(${zoom.scale})`;
+  box.classList.toggle("zoomed",zoom.scale>1.01);
+  $("#zoomlevel").textContent=zoom.scale.toFixed(1)+"\u00d7";
+}
+
+function resetZoom(){
+  zoom.scale=1;zoom.x=0;zoom.y=0;zoom.pointers.clear();
+  zoom.panFrom=null;zoom.moved=false;
+  $("#lightbox").classList.remove("panning");
+  applyZoom();
+}
+
+function zoomTo(next,cx,cy){
+  // keep whatever is under the fingers (or the cursor) pinned in place
+  const box=$("#lightbox").getBoundingClientRect();
+  const px=(cx===undefined?box.width/2:cx-box.left)-box.width/2;
+  const py=(cy===undefined?box.height/2:cy-box.top)-box.height/2;
+  const clamped=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,next));
+  const ratio=clamped/zoom.scale;
+  zoom.x=px-(px-zoom.x)*ratio;
+  zoom.y=py-(py-zoom.y)*ratio;
+  zoom.scale=clamped;
+  if(clamped<=ZOOM_MIN){zoom.x=0;zoom.y=0}
+  applyZoom();
+}
+
+function pointerMid(){
+  const pts=[...zoom.pointers.values()];
+  return {x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2,
+          d:Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y)};
+}
+
+function onPhotoDown(e){
+  if(e.target.closest(".lbclose"))return;
+  // record this before capturing: a captured pointer retargets its later
+  // events to the capturing element, so e.target at pointerup always reads
+  // as the lightbox even when the finger went down on the photo
+  if(zoom.pointers.size===0)zoom.onImage=!!e.target.closest("#lbimg");
+  zoom.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  zoom.moved=false;
+  if(zoom.pointers.size===2){
+    const m=pointerMid();
+    zoom.baseDist=m.d||1;
+    zoom.baseScale=zoom.scale;
+    zoom.panFrom=null;
+  }else if(zoom.pointers.size===1&&zoom.scale>1){
+    zoom.panFrom={x:e.clientX,y:e.clientY,ox:zoom.x,oy:zoom.y};
+    $("#lightbox").classList.add("panning");
+  }
+  try{e.currentTarget.setPointerCapture(e.pointerId)}catch(err){}
+}
+
+function onPhotoMove(e){
+  if(!zoom.pointers.has(e.pointerId))return;
+  zoom.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(zoom.pointers.size>=2){
+    const m=pointerMid();
+    zoomTo(zoom.baseScale*(m.d/zoom.baseDist), m.x, m.y);
+    zoom.moved=true;
+  }else if(zoom.panFrom){
+    zoom.x=zoom.panFrom.ox+(e.clientX-zoom.panFrom.x);
+    zoom.y=zoom.panFrom.oy+(e.clientY-zoom.panFrom.y);
+    if(Math.hypot(e.clientX-zoom.panFrom.x,e.clientY-zoom.panFrom.y)>8)zoom.moved=true;
+    applyZoom();
+  }
+}
+
+function onPhotoUp(e){
+  const wasPinching=zoom.pointers.size>=2;
+  zoom.pointers.delete(e.pointerId);
+  if(zoom.pointers.size<2){zoom.baseScale=zoom.scale}
+  if(zoom.pointers.size===0){
+    zoom.panFrom=null;
+    $("#lightbox").classList.remove("panning");
+    // a pinch or a pan is not half of a double tap: without this, a tap, a
+    // pinch and a tap in quick succession read as one
+    if(zoom.moved||wasPinching)zoom.lastTap=0;
+    if(!zoom.moved&&!wasPinching&&!e.target.closest(".lbclose")){
+      const now=Date.now();
+      if(now-zoom.lastTap<300){
+        // double tap toggles between fit and a close-up on that spot
+        zoomTo(zoom.scale>1.01?ZOOM_MIN:ZOOM_STEP, e.clientX, e.clientY);
+        zoom.lastTap=0;
+      }else{
+        zoom.lastTap=now;
+        // a tap on the letterbox, never on the photo itself, dismisses
+        if(!zoom.onImage&&zoom.scale<=1.01)closePhoto();
+      }
+    }
+  }
+}
+
+function onPhotoWheel(e){
+  e.preventDefault();
+  zoomTo(zoom.scale*(e.deltaY<0?1.15:1/1.15), e.clientX, e.clientY);
+}
+
 function openPhoto(){
   const img=$("#simg");
   if(!state.cur||$("#shot").classList.contains("nophoto"))return;
   if(!img.getAttribute("src")||!img.naturalWidth)return;
   $("#lbimg").src=img.src;
+  resetZoom();  // never inherit the last photo's zoom
   $("#lightbox").classList.add("open");
   setBehindInert(true);
   $("#lbclose").focus();
@@ -929,6 +1053,7 @@ function closePhoto(){
   if(!photoOpen())return;
   $("#lightbox").classList.remove("open");
   $("#lbimg").removeAttribute("src");
+  resetZoom();
   setBehindInert(false);
   const shot=$("#shot");
   if(shot.hasAttribute("tabindex"))shot.focus();
@@ -1059,8 +1184,23 @@ $("#sheetclose").onclick=closeSheet;
 $("#shot").onclick=openPhoto;
 $("#shot").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openPhoto()}};
 $("#lbclose").onclick=e=>{e.stopPropagation();closePhoto()};
-$("#lightbox").onclick=closePhoto;
+// the photo is an interactive surface now, so it is no longer a close button:
+// dismissal is the X, Escape, Telegram back, or a tap on the letterbox
+$("#lightbox").addEventListener("pointerdown",onPhotoDown);
+$("#lightbox").addEventListener("pointermove",onPhotoMove);
+$("#lightbox").addEventListener("pointerup",onPhotoUp);
+$("#lightbox").addEventListener("pointercancel",e=>{
+  zoom.pointers.delete(e.pointerId);zoom.panFrom=null;
+  $("#lightbox").classList.remove("panning");
+});
+$("#lightbox").addEventListener("wheel",onPhotoWheel,{passive:false});
 document.addEventListener("keydown",e=>{
+  if(photoOpen()&&e.key!=="Escape"){
+    if(e.key==="+"||e.key==="="){zoomTo(zoom.scale*1.4);e.preventDefault()}
+    else if(e.key==="-"){zoomTo(zoom.scale/1.4);e.preventDefault()}
+    else if(e.key==="0"){resetZoom();e.preventDefault()}
+    return;
+  }
   if(e.key!=="Escape")return;
   if(photoOpen()){closePhoto();return}   // unwind the photo before the sheet
   if(!$("#sheet").classList.contains("open"))return;
