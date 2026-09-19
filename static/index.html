@@ -168,9 +168,30 @@
   .sheet .wrap{max-width:720px;margin:0 auto;padding:0}
   /* a fixed photo band keeps the route name above the fold whatever the
      aspect ratio of the shot, and leaves a neutral tile if it fails to load */
-  .shot{position:relative;height:38vh;min-height:180px;background:var(--panel-2);
-    border-radius:var(--r-xl) var(--r-xl) 0 0;overflow:hidden}
-  .shot img{width:100%;height:100%;object-fit:cover;display:block}
+  /* a route photo is the point of the route, so it is never cropped: the
+     band takes its height from the shot itself, capped so the name stays
+     above the fold, and a tap opens it full screen */
+  .shot{position:relative;min-height:140px;background:var(--panel-2);
+    border-radius:var(--r-xl) var(--r-xl) 0 0;overflow:hidden;cursor:zoom-in}
+  .shot img{display:block;width:100%;max-height:54vh;object-fit:contain}
+  .zoomhint{position:absolute;right:12px;bottom:12px;display:flex;align-items:center;
+    gap:6px;padding:6px 10px;border-radius:999px;font-size:11.5px;color:#fff;
+    background:rgba(10,12,16,.62);border:1px solid rgba(255,255,255,.14);
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);pointer-events:none}
+  .zoomhint svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round}
+
+  /* full-screen photo, above the sheet */
+  .lightbox{position:fixed;inset:0;z-index:40;display:none;background:#05070a;
+    align-items:center;justify-content:center;cursor:zoom-out}
+  .lightbox.open{display:flex;animation:fade .14s ease}
+  .lightbox img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+  .lbclose{position:fixed;z-index:41;top:max(14px,env(safe-area-inset-top));right:14px;
+    width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.18);
+    background:rgba(10,12,16,.7);color:#fff;font-size:17px;line-height:1;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  .lbclose:hover{background:rgba(10,12,16,.92)}
   /* a zero-height sticky bar pins the exit to the top of the sheet, so it is
      still there once a long route has been scrolled past its photo */
   .sheetbar{position:sticky;top:0;z-index:3;height:0;display:flex;
@@ -304,12 +325,18 @@
   <button data-view="hot"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.8 2.5c.6 3-1.2 4.4-2.6 5.8C8.5 10 6.8 12 6.8 14.7a5.2 5.2 0 0 0 10.4 0c0-1.8-.8-3.4-1.9-4.7-.3 1.1-.9 1.9-1.8 2.4.6-3.6-.3-7.6-.7-9.9z"/><path d="M12 20.4a2.3 2.3 0 0 0 2.3-2.3c0-1.7-2.3-3.5-2.3-3.5s-2.3 1.8-2.3 3.5a2.3 2.3 0 0 0 2.3 2.3z"/></svg>Hot</button>
 </nav>
 
+<div class="lightbox" id="lightbox">
+  <button class="lbclose" id="lbclose" aria-label="Close photo">&#10005;</button>
+  <img id="lbimg" alt="">
+</div>
+
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet">
   <div class="wrap">
     <div class="sheetbar"><button class="sheetclose" id="sheetclose" aria-label="Close route">&#10005;</button></div>
-    <div class="shot">
+    <div class="shot" id="shot" role="button" tabindex="0" aria-label="View photo full screen">
       <img id="simg" alt="">
+      <span class="zoomhint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/></svg>Tap to enlarge</span>
     </div>
     <div class="sbody">
       <h2 id="sname"></h2>
@@ -376,7 +403,7 @@ function setSub(){
     const u=window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user;
     if(u&&u.first_name){state.hello="hey "+u.first_name;setSub()}
     const bb=window.Telegram.WebApp.BackButton;
-    if(bb&&bb.onClick)try{bb.onClick(closeSheet)}catch(e){}
+    if(bb&&bb.onClick)try{bb.onClick(onBack)}catch(e){}
     // learn whether the caller is an admin (drives the Delete route button)
     if(state.initData){
       fetch("/api/me?tg="+encodeURIComponent(state.initData))
@@ -849,6 +876,26 @@ async function deleteRoute(routeId){
     alert("Route deleted.");
   }catch(e){alert("Couldn't delete the route. Check your connection and try again.")}
 }
+function photoOpen(){return $("#lightbox").classList.contains("open")}
+
+function openPhoto(){
+  const img=$("#simg");
+  if(!state.cur||!img.getAttribute("src"))return;
+  $("#lbimg").src=img.src;
+  $("#lightbox").classList.add("open");
+  tgBack(true);
+}
+
+function closePhoto(){
+  $("#lightbox").classList.remove("open");
+  $("#lbimg").removeAttribute("src");
+  // the sheet is still underneath, so the native back button stays on for it
+  tgBack($("#sheet").classList.contains("open"));
+}
+
+// the native back button unwinds one layer at a time, photo before sheet
+function onBack(){photoOpen()?closePhoto():closeSheet()}
+
 function tgBack(show){
   // Telegram's native back button is the exit people reach for first inside
   // a mini-app; it is a no-op in a plain browser, where the ✕ carries it
@@ -946,6 +993,7 @@ async function deleteComment(commentId,routeId){
   }catch(e){alert("Couldn't delete your comment. Check your connection and try again.")}
 }
 function closeSheet(){
+  if(photoOpen())closePhoto();
   const el=document.activeElement;
   if(el&&$("#sheet").contains(el)&&typeof el.blur==="function")el.blur();
   $("#scrim").classList.remove("open");
@@ -960,8 +1008,14 @@ function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt
 /* ---- wire up ---- */
 $("#scrim").onclick=closeSheet;
 $("#sheetclose").onclick=closeSheet;
+$("#shot").onclick=openPhoto;
+$("#shot").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openPhoto()}};
+$("#lbclose").onclick=e=>{e.stopPropagation();closePhoto()};
+$("#lightbox").onclick=closePhoto;
 document.addEventListener("keydown",e=>{
-  if(e.key!=="Escape"||!$("#sheet").classList.contains("open"))return;
+  if(e.key!=="Escape")return;
+  if(photoOpen()){closePhoto();return}   // unwind the photo before the sheet
+  if(!$("#sheet").classList.contains("open"))return;
   const el=document.activeElement;
   if(el&&$("#sheet").contains(el)&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")){
     el.blur();  // commits a pending grade edit and keeps a comment draft

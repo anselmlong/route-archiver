@@ -19,7 +19,8 @@ they just keep posting route pics.
   sorted by hardest, easiest, newest, top rated or most sent, and filtered
   by a grade range and wall section; tap a route for the full photo +
   setter name, and leave via the ✕, the Telegram back button or the
-  backdrop.
+  backdrop. The photo is shown whole rather than cropped, and tapping it
+  opens it full screen with its own ✕.
 - **Admin CRUD** — admins can edit/delete routes from the inline buttons on the
   archived confirmation, or `/routes` to list them.
 - **Route lifecycle** — spray wall routes get physically stripped and re-set,

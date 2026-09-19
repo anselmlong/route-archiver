@@ -1056,3 +1056,84 @@ def test_re_ticking_clears_the_previous_suggested_grade(authed_page):
     assert authed_page.evaluate("state.cur.my_suggested_grade") in (None, "")
     # falls back to the setter's grade, not the suggestion the server dropped
     assert authed_page.locator("#stckgrade").input_value() == "V4"
+
+
+# --------------------------------------------------------------------------- #
+# full-screen route photo
+# --------------------------------------------------------------------------- #
+def test_sheet_photo_is_never_cropped(page):
+    """A route photo is the point of the route. The band used to cover-crop
+    to a fixed height, so a portrait shot lost its top and bottom -- exactly
+    the parts that show where the route starts and finishes."""
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    fit = page.eval_on_selector("#simg", "el => getComputedStyle(el).objectFit")
+    assert fit == "contain"
+
+
+def test_tapping_the_photo_opens_it_full_screen(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    assert page.locator("#lightbox").is_hidden()
+
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+    assert page.locator("#lbimg").get_attribute("src")
+    assert page.eval_on_selector("#lbimg", "el => getComputedStyle(el).objectFit") == "contain"
+
+    page.locator("#lbclose").click()
+    page.wait_for_selector(".lightbox:not(.open)", state="attached")
+    # closing the photo returns to the route, it does not dump you on the list
+    assert page.locator("#sheet").is_visible()
+    assert page.locator("#sname").inner_text() == "Crack Line"
+
+
+def test_escape_unwinds_the_photo_before_the_sheet(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".lightbox:not(.open)", state="attached")
+    assert page.locator("#sheet").is_visible()
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert not page.locator("#sheet").is_visible()
+
+
+def test_telegram_back_unwinds_the_photo_before_the_sheet(page):
+    """Inside Telegram the native back button is the exit people reach for,
+    and it has to peel one layer at a time."""
+    page.evaluate(
+        "window.Telegram={WebApp:{BackButton:{"
+        "show(){window.__bb=true},hide(){window.__bb=false},"
+        "onClick(fn){window.__fire=fn}}}}"
+    )
+    page.evaluate("window.Telegram.WebApp.BackButton.onClick(onBack)")
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+
+    page.evaluate("window.__fire()")
+    page.wait_for_selector(".lightbox:not(.open)", state="attached")
+    assert page.locator("#sheet").is_visible()
+    assert page.evaluate("window.__bb") is True   # still armed for the sheet
+
+    page.evaluate("window.__fire()")
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    assert page.evaluate("window.__bb") is False
+
+
+def test_closing_the_sheet_takes_the_photo_with_it(page):
+    page.locator(".card", has_text="Crack Line").click()
+    page.wait_for_selector(".scrim.open")
+    page.locator("#shot").click()
+    page.wait_for_selector(".lightbox.open")
+
+    page.eval_on_selector("#scrim", "el => el.click()")
+    page.wait_for_selector(".scrim:not(.open)", state="attached")
+    # a full-screen photo left floating over the route list would trap the user
+    assert page.locator("#lightbox").is_hidden()
