@@ -38,7 +38,7 @@ _FULL = V_ORDER + [
 _FULL_IDX = {g: i for i, g in enumerate(_FULL)}
 
 # bumped whenever grade_low indices change meaning; drives _migrate_grade_scale
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # canonical wall sections (Left / Middle / Right) + common aliases
 WALL_ALIASES = {
@@ -100,9 +100,15 @@ def _normalize_grade_token(tok: str) -> str:
 
 
 def _grade_low(display: str) -> int:
-    """Lower-bound sort index for a (possibly ranged) grade display."""
+    """Sort index for a (possibly ranged) grade display.
+
+    A range keys off its UPPER bound — the hardest end — so V4-V5 ranks
+    harder than a plain V4 (which is physically true: it goes up to V5).
+    Keying off the lower bound instead would tie V4-V5 with V4, putting
+    them in the same sort bucket even though one is objectively harder.
+    """
     parts = re.split(r"[-/]", display)
-    return _V_IDX[parts[0]]
+    return _V_IDX[parts[-1]]
 
 
 def _clamp_grade(display):

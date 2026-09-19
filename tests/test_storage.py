@@ -25,9 +25,9 @@ def gl(grade):
     ("juggy one - V4",
      {"name": "juggy one", "grade": "V4", "grade_low": gl("V4"), "wall": None, "description": None}),
     ("fun route (V3-4) (dont break pls)",
-     {"name": "fun route", "grade": "V3-V4", "grade_low": gl("V3"), "wall": None, "description": "dont break pls"}),
+     {"name": "fun route", "grade": "V3-V4", "grade_low": gl("V4"), "wall": None, "description": "dont break pls"}),
     ("Warmup V2/V3 left",
-     {"name": "Warmup", "grade": "V2-V3", "grade_low": gl("V2"), "wall": "Left", "description": None}),
+     {"name": "Warmup", "grade": "V2-V3", "grade_low": gl("V3"), "wall": "Left", "description": None}),
 ])
 def test_parse_caption_cases(caption, expected):
     assert parse_caption(caption) == expected
@@ -69,11 +69,13 @@ def test_parse_caption_keeps_half_steps():
     assert parse_caption("Route VB+")["grade"] == "VB"
 
 
-def test_parse_caption_range_sorts_at_its_lowest_grade():
-    # a route spanning two grades is filed under the easier one, so it can
-    # never hide above the range a climber filtered for
-    assert parse_caption("Slopey V3-4")["grade_low"] == gl("V3")
-    assert parse_caption("Sandbag V2/V5")["grade_low"] == gl("V2")
+def test_parse_caption_range_sorts_at_its_hardest_grade():
+    # a route spanning two grades files under the harder end, so the
+    # collection's difficulty sort reflects what it actually is: a V3-4 is
+    # harder than a V3 and V2/V5 harder than a V2. (Previously it filed at
+    # the easier end, which tied a ranged route with its floor grade.)
+    assert parse_caption("Slopey V3-4")["grade_low"] == gl("V4")
+    assert parse_caption("Sandbag V2/V5")["grade_low"] == gl("V5")
 
 
 def test_parse_grade_token_rejects_out_of_range_grade():

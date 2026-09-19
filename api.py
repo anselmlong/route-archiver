@@ -117,6 +117,26 @@ class DeleteCommentBody(BaseModel):
     init_data: str | None = None
 
 
+def _validate_suggested_grade(suggested: str | None):
+    """Return the canonical suggested grade, or None to mean 'not provided'.
+
+    A suggested grade must parse as a real V-grade on the accepted scale
+    (VB..V17, optional half-step, optional range). Anything else — free
+    text, typos, "feels hard" — raises so garbage is never stored. A
+    caller wanting to clear their suggestion sends an explicit empty string.
+    """
+    if suggested is None:
+        return None
+    cleaned = (suggested or "").strip()
+    if cleaned == "":
+        return ""  # explicit clear — distinct from "not provided"
+    from storage import _grade_low_from_free_text
+    if _grade_low_from_free_text(cleaned) is None:
+        return JSONResponse(status_code=422,
+                            content={"error": f"'{cleaned}' is not a valid grade"})
+    return cleaned
+
+
 # --------------------------------------------------------------------------- #
 # routes
 # --------------------------------------------------------------------------- #
@@ -176,11 +196,14 @@ async def tick(route_id: int, body: TickBody, request: Request):
         uid, name = _identity(body, request)
     except ValueError as e:
         return JSONResponse(status_code=401, content={"error": str(e)})
+    suggested = _validate_suggested_grade(body.suggested_grade)
+    if isinstance(suggested, JSONResponse):
+        return suggested
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
     storage.track("tick", tg_user_id=uid, route_id=route_id,
-                  payload=body.suggested_grade or "")
-    return storage.toggle_tick(route_id, uid, name, body.suggested_grade)
+                  payload=suggested or "")
+    return storage.toggle_tick(route_id, uid, name, suggested)
 
 
 @app.put("/api/tick/{route_id}/grade")
@@ -190,15 +213,18 @@ async def tick_grade(route_id: int, body: TickGradeBody, request: Request):
         uid, _ = _identity(body, request)
     except ValueError as e:
         return JSONResponse(status_code=401, content={"error": str(e)})
+    suggested = _validate_suggested_grade(body.suggested_grade)
+    if isinstance(suggested, JSONResponse):
+        return suggested
     if not storage.get_route(route_id):
         return JSONResponse(status_code=404, content={"error": "route not found"})
-    if not storage.set_tick_grade(route_id, uid, body.suggested_grade):
+    if not storage.set_tick_grade(route_id, uid, suggested):
         # no tick to hang the suggestion on: saying "saved" here would show a
         # confirmation and a consensus that silently excluded the caller
         return JSONResponse(status_code=409,
                             content={"error": "tick this route before suggesting a grade"})
     consensus_grade, consensus_count = storage.route_consensus(route_id)
-    return {"ticked": True, "suggested_grade": body.suggested_grade,
+    return {"ticked": True, "suggested_grade": suggested,
             "consensus_grade": consensus_grade, "consensus_count": consensus_count}
 
 

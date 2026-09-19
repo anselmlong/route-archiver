@@ -830,7 +830,11 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def _set_menu_button(app) -> None:
     """Pin the Mini App as the bot's menu button (the ⋯ / ⚙️ menu)."""
     try:
-        await app.bot.set_chat_menu_button(menu_button={"type": "web_app", "text": "Routes", "web_app": {"url": APP_BASE}})
+        # ?v= busts Telegram's WebApp cache: the client caches the mini-app
+        # content keyed on this URL, so bumping `v` after a deploy forces the
+        # next open to pull the fresh page instead of a stale snapshot.
+        url = APP_BASE + "?v=3"
+        await app.bot.set_chat_menu_button(menu_button={"type": "web_app", "text": "Routes", "web_app": {"url": url}})
     except Exception as e:
         log.warning("set_chat_menu_button failed: %s", e)
 

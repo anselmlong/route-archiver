@@ -310,6 +310,34 @@ def test_tick_grade_404_for_missing_route(client, api_module):
     assert r.status_code == 404
 
 
+def test_tick_rejects_garbage_suggested_grade(client, api_module):
+    """Free text / typos must not be stored as a suggested grade."""
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=5)
+    for bad in ["feels hard", "4", "V?X", "easy", "twelve"]:
+        r = client.post(f"/api/tick/{route['id']}",
+                        json={"suggested_grade": bad, "init_data": raw})
+        assert r.status_code == 422, f"{bad!r} should be rejected"
+
+
+def test_tick_grade_rejects_garbage_suggested_grade(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=5)
+    client.post(f"/api/tick/{route['id']}", json={"init_data": raw})
+    r = client.put(f"/api/tick/{route['id']}/grade",
+                   json={"suggested_grade": "not a grade", "init_data": raw})
+    assert r.status_code == 422
+
+
+def test_tick_accepts_valid_suggested_grade(client, api_module):
+    route = _seed_route(api_module)
+    raw = sign_init_data(TEST_BOT_TOKEN, user_id=5)
+    r = client.post(f"/api/tick/{route['id']}",
+                    json={"suggested_grade": "V4+", "init_data": raw})
+    assert r.status_code == 200
+    assert r.json()["suggested_grade"] == "V4+"
+
+
 # --------------------------------------------------------------------------- #
 # GET /api/me (personal logbook)
 # --------------------------------------------------------------------------- #

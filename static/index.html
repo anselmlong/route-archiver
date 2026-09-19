@@ -376,7 +376,7 @@
           <button class="tickbtn" id="stck">✓ Tick sent</button>
           <span class="gradewrap hidden" id="stckgradewrap">
             <span class="gradelab2">felt like</span>
-            <input class="tickgrade" id="stckgrade" placeholder="V?" maxlength="6" inputmode="text" aria-label="Suggested grade">
+            <select class="tickgrade" id="stckgrade" aria-label="Suggested grade"></select>
           </span>
           <span class="tickmeta" id="sascent"></span>
           <span class="saved" id="gradesaved" hidden></span>
@@ -821,7 +821,7 @@ async function tick(id,val){
 }
 
 async function setTickGrade(id){
-  const g=$("#stckgrade").value.trim();
+  const g=$("#stckgrade").value;
   const slot=$("#gradesaved");
   if(!g||!state.initData)return;
   try{
@@ -839,6 +839,23 @@ async function setTickGrade(id){
 }
 
 /* ---- sheet open/refresh ---- */
+function populateGradeDropdown(sel, anchor){
+  // A fixed, bounded set of options (±3 around the route's own grade,
+  // clamped to the scale ends) — no free text, so garbage can't be typed.
+  // Grounded at the route's grade: it's the pre-selected default (a ranged
+  // route anchors at its hardest end, matching how it sorts), and the
+  // setter/consensus suggestion overrides it when one exists.
+  const parts=String(anchor||"").split("-");
+  const hard=parts[parts.length-1].trim();
+  const base=Math.max(0,state.grades.indexOf(hard));
+  const lo=Math.max(0,base-3), hi=Math.min(state.grades.length-1,base+3);
+  sel.replaceChildren(...state.grades.slice(lo,hi+1).map(g=>{
+    const o=document.createElement("option");
+    o.value=g; o.textContent=g;
+    if(g===hard)o.selected=true;
+    return o;
+  }));
+}
 function refreshSheet(){
   const r=state.cur; if(!r)return;
   $("#sgrade").textContent=r.grade;
@@ -863,6 +880,7 @@ function refreshSheet(){
   t.textContent=r.my_tick?"✓ Sent":"✓ Tick sent";
   if(r.my_tick){
     tw.classList.remove("hidden");
+    populateGradeDropdown(tg,r.grade||"V?");
     tg.value=r.my_suggested_grade||r.grade||"V?";
   }else{
     tw.classList.add("hidden");

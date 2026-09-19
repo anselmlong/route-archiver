@@ -753,6 +753,7 @@ def test_grade_suggestion_confirms_and_refreshes_the_consensus(authed_page):
     """Regression: submitting a suggested grade wrote to the server and
     changed nothing on screen -- no confirmation, and the community-grade
     line above it stayed stale until a full reload."""
+    _reload_personalised(authed_page)
     authed_page.locator(".card", has_text="Crack Line").click()
     authed_page.wait_for_selector(".scrim.open")
     # tg_user_id=1 already ticked this route suggesting V4
@@ -760,12 +761,12 @@ def test_grade_suggestion_confirms_and_refreshes_the_consensus(authed_page):
 
     authed_page.eval_on_selector(
         "#stckgrade",
-        "el => { el.value = 'V6'; el.dispatchEvent(new Event('change')); }",
+        "el => { el.value = 'V5+'; el.dispatchEvent(new Event('change')); }",
     )
     authed_page.wait_for_selector("#gradesaved:not([hidden])")
     assert "saved" in authed_page.locator("#gradesaved").inner_text()
     # the consensus line reflects the new suggestion without a reload
-    assert "V6" in authed_page.locator("#sconsensus").inner_text()
+    assert "V5" in authed_page.locator("#sconsensus").inner_text()
 
 
 def test_failed_rating_surfaces_an_error_instead_of_going_quiet(authed_page):
@@ -1016,15 +1017,15 @@ def test_escape_commits_a_pending_grade_edit(authed_page):
     _reload_personalised(authed_page)
     authed_page.locator(".card", has_text="Crack Line").click()
     authed_page.wait_for_selector(".scrim.open")
-    authed_page.locator("#stckgrade").fill("V7")
+    authed_page.locator("#stckgrade").select_option("V5+")
     authed_page.keyboard.press("Escape")   # first leaves the field
     authed_page.keyboard.press("Escape")   # second closes the sheet
     authed_page.wait_for_selector(".scrim:not(.open)", state="attached")
 
     authed_page.locator(".card", has_text="Crack Line").click()
     authed_page.wait_for_selector(".scrim.open")
-    assert authed_page.locator("#stckgrade").input_value() == "V7"
-    assert "V7" in authed_page.locator("#sconsensus").inner_text()
+    assert authed_page.locator("#stckgrade").input_value() == "V5+"
+    assert "V5" in authed_page.locator("#sconsensus").inner_text()
 
 
 def test_escape_in_the_comment_box_keeps_the_draft(authed_page):
@@ -1049,9 +1050,8 @@ def test_re_ticking_clears_the_previous_suggested_grade(authed_page):
     authed_page.wait_for_selector(".scrim.open")
     # make the suggestion differ from the setter's own grade, so the fallback
     # and the stale value are telling apart
-    authed_page.locator("#stckgrade").fill("V7")
-    authed_page.locator("#stckgrade").blur()
-    authed_page.wait_for_function("state.cur.my_suggested_grade === 'V7'")
+    authed_page.locator("#stckgrade").select_option("V5+")
+    authed_page.wait_for_function("state.cur.my_suggested_grade === 'V5+'")
 
     authed_page.locator("#stck").click()          # untick
     authed_page.wait_for_function("state.cur.my_tick === 0")
@@ -1060,6 +1060,23 @@ def test_re_ticking_clears_the_previous_suggested_grade(authed_page):
 
     assert authed_page.evaluate("state.cur.my_suggested_grade") in (None, "")
     # falls back to the setter's grade, not the suggestion the server dropped
+    assert authed_page.locator("#stckgrade").input_value() == "V4"
+
+
+def test_suggested_grade_dropdown_is_grounded_around_the_route(authed_page):
+    """Crack Line is V4, so the dropdown spans V4±3 (V2+..V5+), defaults to
+    the setter's grade, and offers no option far above/below it."""
+    _reload_personalised(authed_page)
+    authed_page.locator(".card", has_text="Crack Line").click()
+    authed_page.wait_for_selector(".scrim.open")
+    opts = authed_page.eval_on_selector(
+        "#stckgrade", "el => [...el.options].map(o => o.value)")
+    assert opts[0] == "V2+", opts        # lower clamp
+    assert opts[-1] == "V5+", opts       # upper clamp (V4+3, half-steps count)
+    assert "V4" in opts
+    assert "V7" not in opts and "VB" not in opts
+    # grounded default = the route's own grade (pre-selected when no
+    # climber suggestion overrides it)
     assert authed_page.locator("#stckgrade").input_value() == "V4"
 
 
