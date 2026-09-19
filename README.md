@@ -15,9 +15,11 @@ they just keep posting route pics.
 ## Features
 - **Auto-archive** — captioned route photos in the group are parsed and saved
   (name, grade, wall, setter, photo).
-- **Mini-app** (`routes.anselmlong.com`) — sortable/filterable list by grade
-  (VB–V8+) and wall section (left vertical / middle overhang / right slab);
-  tap a route for the full photo + setter name.
+- **Mini-app** (`routes.anselmlong.com`) — list of what's on the wall now,
+  sorted by hardest, easiest, newest, top rated or most sent, and filtered
+  by a grade range and wall section; tap a route for the full photo +
+  setter name, and leave via the ✕, the Telegram back button or the
+  backdrop.
 - **Admin CRUD** — admins can edit/delete routes from the inline buttons on the
   archived confirmation, or `/routes` to list them.
 - **Route lifecycle** — spray wall routes get physically stripped and re-set,
@@ -63,6 +65,25 @@ they just keep posting route pics.
   you to a DM whenever a matching route is archived; `/notify off` stops
   them, plain `/notify` shows your current subscription. A user who
   blocks the bot is silently unsubscribed on the next send.
+
+## Grades
+The scale runs `VB` through `V8+` and carries every half-step in between
+(`V0+`, `V1+`, … `V8+`), so a caption reading `V4+` is archived and shown as
+`V4+` rather than rounded to `V4`. Anything harder than `V8+` clamps to
+`V8+`. A route captioned with a range (`V3-4`, `V3/V4`) keeps the range as
+its display grade but sorts and filters at its **lowest** grade, so it can
+never hide above the range someone filtered for. `V?` (or a bare `V`) marks
+an ungraded route: it sorts last in either direction and drops out as soon
+as a grade range is narrowed, since nothing can say whether it belongs
+inside one.
+
+`grade_low` is an index into that scale, so changing the scale changes what
+every stored index means. `Storage._migrate_grade_scale()` re-indexes routes
+and tick suggestions from the display grade they were stored with, remaps
+subscription thresholds, and stamps `PRAGMA user_version` so it runs once.
+Half-steps flattened by the older parser are gone from the display too, so a
+route archived as `V4+` back then stays `V4`; only routes captioned since
+carry the plus.
 
 ## Wall sections (canonical)
 | Alias input            | Canonical              |

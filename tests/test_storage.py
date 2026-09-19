@@ -1,7 +1,13 @@
 """Caption parser + Storage CRUD/ratings/ticks tests."""
 import pytest
 
-from storage import GradeError, WILD_LOW, parse_caption
+from storage import V_ORDER, GradeError, WILD_LOW, parse_caption
+
+
+def gl(grade):
+    """Sort index of a grade, derived from the live scale so these tests
+    survive the scale changing under them again."""
+    return V_ORDER.index(grade)
 
 
 # --------------------------------------------------------------------------- #
@@ -9,19 +15,19 @@ from storage import GradeError, WILD_LOW, parse_caption
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("caption,expected", [
     ("Crack Line / V4+ / left vertical",
-     {"name": "Crack Line", "grade": "V4", "grade_low": 5, "wall": "Left", "description": None}),
+     {"name": "Crack Line", "grade": "V4+", "grade_low": gl("V4+"), "wall": "Left", "description": None}),
     ("Overhang Dyno / V8+ / right slab",
-     {"name": "Overhang Dyno", "grade": "V8+", "grade_low": 10, "wall": "Right", "description": None}),
+     {"name": "Overhang Dyno", "grade": "V8+", "grade_low": gl("V8+"), "wall": "Right", "description": None}),
     ("Project #1 / V7 / Cave",
-     {"name": "Project #1", "grade": "V7", "grade_low": 8, "wall": "Middle", "description": None}),
+     {"name": "Project #1", "grade": "V7", "grade_low": gl("V7"), "wall": "Middle", "description": None}),
     ("V4",
-     {"name": "Untitled", "grade": "V4", "grade_low": 5, "wall": None, "description": None}),
+     {"name": "Untitled", "grade": "V4", "grade_low": gl("V4"), "wall": None, "description": None}),
     ("juggy one - V4",
-     {"name": "juggy one", "grade": "V4", "grade_low": 5, "wall": None, "description": None}),
+     {"name": "juggy one", "grade": "V4", "grade_low": gl("V4"), "wall": None, "description": None}),
     ("fun route (V3-4) (dont break pls)",
-     {"name": "fun route", "grade": "V3-V4", "grade_low": 4, "wall": None, "description": "dont break pls"}),
+     {"name": "fun route", "grade": "V3-V4", "grade_low": gl("V3"), "wall": None, "description": "dont break pls"}),
     ("Warmup V2/V3 left",
-     {"name": "Warmup", "grade": "V2-V3", "grade_low": 3, "wall": "Left", "description": None}),
+     {"name": "Warmup", "grade": "V2-V3", "grade_low": gl("V2"), "wall": "Left", "description": None}),
 ])
 def test_parse_caption_cases(caption, expected):
     assert parse_caption(caption) == expected
@@ -53,9 +59,21 @@ def test_parse_caption_wildcard_sorts_below_everything():
     assert parsed["wall"] == "Left"
 
 
-def test_parse_caption_half_step_dropped_below_top():
-    # V4+ -> V4 (half-steps only survive at the very top, V8+)
-    assert parse_caption("Route V4+")["grade"] == "V4"
+def test_parse_caption_keeps_half_steps():
+    # half-steps are real grades on the scale, not noise to round away
+    assert parse_caption("Route V4+")["grade"] == "V4+"
+    assert parse_caption("Route V4+")["grade_low"] == gl("V4+")
+    # ...and they sort strictly between the two whole grades either side
+    assert gl("V4") < gl("V4+") < gl("V5")
+    # VB+ is the one exception: nothing sits below V0, so it folds to VB
+    assert parse_caption("Route VB+")["grade"] == "VB"
+
+
+def test_parse_caption_range_sorts_at_its_lowest_grade():
+    # a route spanning two grades is filed under the easier one, so it can
+    # never hide above the range a climber filtered for
+    assert parse_caption("Slopey V3-4")["grade_low"] == gl("V3")
+    assert parse_caption("Sandbag V2/V5")["grade_low"] == gl("V2")
 
 
 def test_parse_grade_token_rejects_out_of_range_grade():
@@ -94,8 +112,8 @@ def test_delete_route_soft_hides_from_list_and_get(storage):
 
 
 def test_list_routes_filters_by_min_grade(storage):
-    storage.add_route(name="Easy", grade="V1", grade_low=1)
-    hard = storage.add_route(name="Hard", grade="V6", grade_low=7)
+    storage.add_route(name="Easy", grade="V1", grade_low=gl("V1"))
+    hard = storage.add_route(name="Hard", grade="V6", grade_low=gl("V6"))
     ids = [r["id"] for r in storage.list_routes(grade="V5")]
     assert ids == [hard["id"]]
 
@@ -111,7 +129,7 @@ def test_update_route_reparses_grade_when_grade_low_not_given(storage):
     r = storage.add_route(name="X", grade="V1", grade_low=1)
     updated = storage.update_route(r["id"], grade="V5")
     assert updated["grade"] == "V5"
-    assert updated["grade_low"] == 6
+    assert updated["grade_low"] == gl("V5")
 
 
 def test_walls_returns_sorted_distinct(storage):
@@ -162,9 +180,11 @@ def test_attach_ratings_and_ticks_personalizes_my_rating(storage):
 def test_toggle_tick_on_then_off(storage):
     r = storage.add_route(name="X", grade="V1", grade_low=1)
     on = storage.toggle_tick(r["id"], tg_user_id=1, tg_user_name="A", suggested_grade="V5")
-    assert on == {"ticked": True, "count": 1, "suggested_grade": "V5"}
+    assert on == {"ticked": True, "count": 1, "suggested_grade": "V5",
+                  "consensus_grade": "V5", "consensus_count": 1}
     off = storage.toggle_tick(r["id"], tg_user_id=1, tg_user_name="A")
-    assert off == {"ticked": False, "count": 0, "suggested_grade": None}
+    assert off == {"ticked": False, "count": 0, "suggested_grade": None,
+                   "consensus_grade": None, "consensus_count": 0}
 
 
 def test_set_tick_grade_updates_existing_tick(storage):
@@ -714,3 +734,62 @@ def test_track_and_analytics_aggregate(storage):
     assert a["top_routes"][0]["route_id"] == 10
     assert a["top_routes"][0]["c"] == 2
     assert a["activity_by_day"]
+
+
+# --------------------------------------------------------------------------- #
+# grade-scale migration
+# --------------------------------------------------------------------------- #
+def _fake_legacy_db(tmp_path, storage_module, rows, sub_low=None):
+    """Build a DB that looks like it was written under the old 11-step scale:
+    right display grades, stale indices, and no schema stamp."""
+    import sqlite3
+    path = tmp_path / "legacy.db"
+    s = storage_module.Storage(db_path=path)
+    for name, grade, legacy_low in rows:
+        s.add_route(name=name, grade=grade, grade_low=legacy_low)
+    r = s.list_routes()[0]
+    s.toggle_tick(r["id"], tg_user_id=1, tg_user_name="A", suggested_grade="V6")
+    if sub_low is not None:
+        s.subscribe(tg_user_id=1, tg_chat_id=1, min_grade_low=sub_low)
+    with sqlite3.connect(path) as conn:
+        # rewind the stamp so the next open re-runs the migration
+        conn.execute("PRAGMA user_version = 0")
+        conn.execute("UPDATE ticks SET suggested_grade_low=6")
+    return path
+
+
+def test_migration_reindexes_routes_to_the_new_scale(tmp_path, storage_module):
+    # V6 was index 7 on the 11-step scale; it is a different index now
+    path = _fake_legacy_db(tmp_path, storage_module,
+                           [("Hard", "V6", 7), ("Easy", "VB", 0)])
+    migrated = storage_module.Storage(db_path=path)
+    by_name = {r["name"]: r for r in migrated.list_routes()}
+    assert by_name["Hard"]["grade_low"] == gl("V6")
+    assert by_name["Easy"]["grade_low"] == gl("VB")
+    # the display grade is the source of truth and is never rewritten
+    assert by_name["Hard"]["grade"] == "V6"
+
+
+def test_migration_reindexes_tick_suggestions(tmp_path, storage_module):
+    path = _fake_legacy_db(tmp_path, storage_module, [("Hard", "V6", 7)])
+    migrated = storage_module.Storage(db_path=path)
+    rows = migrated.list_routes()
+    migrated.attach_ratings_and_ticks(rows, tg_user_id=1)
+    # a stale index would put the consensus on the wrong grade entirely
+    assert rows[0]["consensus_grade"] == "V6"
+
+
+def test_migration_remaps_subscription_thresholds(tmp_path, storage_module):
+    # index 5 meant V4 on the 11-step scale; it means V2 on this one, so an
+    # unmigrated threshold would quietly start spamming two grades too low
+    path = _fake_legacy_db(tmp_path, storage_module, [("Hard", "V6", 7)], sub_low=5)
+    migrated = storage_module.Storage(db_path=path)
+    assert migrated.get_subscription(1)["min_grade_low"] == gl("V4")
+
+
+def test_migration_runs_once_and_leaves_fresh_dbs_alone(tmp_path, storage_module):
+    path = _fake_legacy_db(tmp_path, storage_module, [("Hard", "V6", 7)])
+    storage_module.Storage(db_path=path)
+    again = storage_module.Storage(db_path=path)
+    # re-running over already-correct indices must be a no-op, not a shift
+    assert again.list_routes()[0]["grade_low"] == gl("V6")
