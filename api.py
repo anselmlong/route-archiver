@@ -8,6 +8,7 @@ import hmac
 import json
 import logging
 import os
+import sqlite3
 import time
 import urllib.parse
 from pathlib import Path
@@ -468,3 +469,15 @@ def analytics(request: Request, days: int = 14, tg: str | None = None):
 @app.get("/healthz")
 def health():
     return {"ok": True}
+
+
+@app.get("/readyz")
+def readiness():
+    """Read-only dependency probe; liveness remains independent of SQLite."""
+    try:
+        storage.check_readiness()
+    except (sqlite3.Error, OSError):
+        log.warning("Readiness failed: route database is unavailable")
+        return JSONResponse(status_code=503, content={"ok": False},
+                            headers={"Cache-Control": "no-store"})
+    return JSONResponse(content={"ok": True}, headers={"Cache-Control": "no-store"})
