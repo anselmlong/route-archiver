@@ -81,12 +81,6 @@ def _md_escape(s) -> str:
     return _MD_SPECIAL.sub(r"\\\1", str(s))
 
 
-def _route_line(r: dict) -> str:
-    wall = f" · {_md_escape(r['wall'])}" if r.get("wall") else ""
-    setter = f" by {_md_escape(r['setter_name'])}" if r.get("setter_name") else ""
-    return f"🧗 *{_md_escape(r['name'])}* — {r['grade']}{wall}{setter}"
-
-
 def _app_link(r: dict) -> InlineKeyboardMarkup:
     """URL button to the full-screen Mini App (t.me short link).
 
@@ -249,8 +243,10 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     storage.track("new-route", tg_user_id=setter_id, route_id=route["id"],
                   payload=route["grade"])
-    # admin-only quick actions on the confirmation
-    kb = _route_admin_buttons(route, admin=_is_admin(setter_id) if setter_id else False)
+    # keep the confirmation clean — a single Open-collection button. All
+    # management (edit / delete / retire) happens inside the app, so we can
+    # archive without spamming the group with admin buttons on every post.
+    kb = _app_link({})
 
     desc = f"\n📝 {_md_escape(route['description'])}" if route.get("description") else ""
     await msg.reply_text(
@@ -293,167 +289,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "`Crack Line V4`\n"
         "Post it in the topic for its wall (left / overhang / slab) and I'll\n"
         "tag the wall automatically.\n\n"
-        "/mine — your own send history\n"
-        "/leaderboard — top climbers & setters\n"
-        "/hot — what's hot this week\n"
-        "/setter <name> — a setter's profile\n"
-        "/search <name or setter> — find a route\n"
-        "/notify [grade] [wall] — DM me new routes matching your taste "
-        "(only works in a private chat with me, not here)\n\n"
-        "Tap for the full collection.",
+        "Everything else — browsing, leaderboards, your logbook, setters —\n"
+        "happens in the app. Tap below to open the full collection.\n\n"
+        "(Admins: /wall, /reset, /setchat, /notify, /cancel.)",
         parse_mode="Markdown",
         reply_markup=_app_link({}),
-    )
-
-
-async def cmd_routes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args or []
-    grade_filter = None
-    wall_filter = None
-    if args:
-        for a in args:
-            if a.upper().startswith("V") or a.upper() == "VB":
-                grade_filter = a
-            else:
-                wall_filter = a
-    routes = storage.list_routes(grade=grade_filter, wall=wall_filter)
-    if not routes:
-        await update.effective_message.reply_text("No routes found.")
-        return
-    lines = [f"*{len(routes)} routes*"
-             + (f" · ≥{grade_filter}" if grade_filter else "")
-             + (f" · {wall_filter}" if wall_filter else "")]
-    for r in routes[:30]:
-        lines.append(_route_line(r))
-    if len(routes) > 30:
-        lines.append(f"\n…and {len(routes)-30} more. Open the collection for all.")
-    stats = storage.stats()
-    lines.append(f"\n_{stats['active']} active · {stats['retired']} retired all-time_")
-    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-
-async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Search active routes by name or setter: /search <query>."""
-    args = ctx.args or []
-    if not args:
-        await update.effective_message.reply_text("Usage: /search <name or setter>")
-        return
-    query = " ".join(args)
-    routes = storage.list_routes(search=query)
-    if not routes:
-        await update.effective_message.reply_text(f"No routes matching {query!r}.")
-        return
-    lines = [f"*{len(routes)} match" + ("" if len(routes) == 1 else "es")
-             + f'* for "{_md_escape(query)}"']
-    for r in routes[:30]:
-        lines.append(_route_line(r))
-    if len(routes) > 30:
-        lines.append(f"\n…and {len(routes) - 30} more. Open the collection for all.")
-    await update.effective_message.reply_text(
-        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
-    )
-
-
-def _hardest(routes: list[dict]):
-    """(grade, grade_low) of the hardest route in a list, ignoring
-    wildcard-graded ones. None if there's nothing gradeable."""
-    hardest_grade, hardest_low = None, WILD_LOW
-    for r in routes:
-        if r["grade_low"] > hardest_low:
-            hardest_low, hardest_grade = r["grade_low"], r["grade"]
-    return hardest_grade
-
-
-async def cmd_mine(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Your own send history: /mine."""
-    user = update.effective_user
-    if not user:
-        return
-    routes = storage.user_ticked_routes(user.id)
-    if not routes:
-        await update.effective_message.reply_text(
-            "No ticks yet — open a route in the collection and mark it sent.",
-            reply_markup=_app_link({}),
-        )
-        return
-    hardest = _hardest(routes)
-    lines = [f"*{len(routes)} sends* · hardest {hardest}"]
-    for r in routes[:20]:
-        suffix = " _(retired)_" if r.get("retired_at") else ""
-        lines.append(_route_line(r) + suffix)
-    if len(routes) > 20:
-        lines.append(f"\n…and {len(routes)-20} more. Open the collection for your full list.")
-    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-
-_MEDALS = ["🥇", "🥈", "🥉"]
-
-
-async def cmd_leaderboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Top climbers (sends + hardest grade) and top setters: /leaderboard."""
-    climbers = storage.leaderboard_climbers(10)
-    setters = storage.leaderboard_setters(10)
-
-    lines = ["🏆 *Top climbers*"]
-    if not climbers:
-        lines.append("No ticks yet.")
-    for i, c in enumerate(climbers):
-        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
-        name = _md_escape(c["tg_user_name"] or f"user_{c['tg_user_id']}")
-        lines.append(f"{rank} {name} — {c['ticks']} sends · hardest {c['hardest_grade']}")
-
-    lines.append("\n🔨 *Top setters*")
-    if not setters:
-        lines.append("No routes set yet.")
-    for i, s in enumerate(setters):
-        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
-        name = _md_escape(s["setter_name"] or f"setter_{s['setter_id']}")
-        lines.append(f"{rank} {name} — {s['routes_set']} routes set")
-
-    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-
-async def cmd_hot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """What's hot this week -- routes with the most ticks in the last 7
-    days, rank #1 being the de facto "route of the week": /hot."""
-    routes = storage.hot_routes(days=7, limit=10)
-    if not routes:
-        await update.effective_message.reply_text(
-            "No sends yet this week — be the first!", reply_markup=_app_link({})
-        )
-        return
-    lines = ["🔥 *Hot this week*"]
-    for i, r in enumerate(routes):
-        rank = _MEDALS[i] if i < 3 else f"{i + 1}."
-        n = r["recent_ticks"]
-        lines.append(f"{rank} {_route_line(r)} — {n} send{'' if n == 1 else 's'} this week")
-    await update.effective_message.reply_text(
-        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
-    )
-
-
-async def cmd_setter(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """A setter's own profile by name: /setter <name>."""
-    args = ctx.args or []
-    if not args:
-        await update.effective_message.reply_text("Usage: /setter <name>")
-        return
-    name = " ".join(args)
-    setter_id = storage.find_setter_id(name)
-    if setter_id is None:
-        await update.effective_message.reply_text(f"No setter matching {name!r}.")
-        return
-    profile = storage.setter_profile(setter_id)
-    lines = [
-        f"🔨 *{_md_escape(profile['setter_name'])}*",
-        f"{profile['routes_set']} routes set · {profile['active']} active · {profile['retired']} retired",
-    ]
-    for r in profile["routes"][:15]:
-        lines.append(_route_line(r))
-    if len(profile["routes"]) > 15:
-        lines.append(f"\n…and {len(profile['routes']) - 15} more. Open the collection for all.")
-    await update.effective_message.reply_text(
-        "\n".join(lines), parse_mode="Markdown", reply_markup=_app_link({})
     )
 
 
@@ -759,44 +599,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Cancelled.")
 
 
-async def cmd_app(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Open the Mini App directly."""
-    await update.effective_message.reply_text(
-        "Open the route collection 👇",
-        reply_markup=_app_link({}),
-    )
-
-
-async def cmd_open(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Alias for /app — opens the route collection."""
-    await update.effective_message.reply_text(
-        "Open the route collection 👇",
-        reply_markup=_app_link({}),
-    )
-
-
-async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Friendly overview of the bot and its commands."""
-    await update.effective_message.reply_text(
-        "🧗 *USC Routes*\n\n"
-        "Setters: just post a photo of a route with its name + grade in the "
-        "right wall topic — I archive it automatically.\n"
-        "`Crack Line V4`\n\n"
-        "*Commands*\n"
-        "/open — open the route collection\n"
-        "/mine — your send history\n"
-        "/leaderboard — top climbers & setters\n"
-        "/hot — what's hot this week\n"
-        "/setter \\<name\\> — a setter's profile\n"
-        "/search \\<name or setter\\> — find a route\n"
-        "/notify [grade] [wall] — DM me new routes you'd like "
-        "(works in a private chat with me)\n\n"
-        "Tap to open the full collection.",
-        parse_mode="Markdown",
-        reply_markup=_app_link({}),
-    )
-
-
 async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Usage stats: /stats (admins only)."""
     user = update.effective_user
@@ -842,21 +644,12 @@ async def _set_menu_button(app) -> None:
 def run():
     app = Application.builder().token(BOT_TOKEN).post_init(_set_menu_button).build()
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("routes", cmd_routes))
-    app.add_handler(CommandHandler("mine", cmd_mine))
-    app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
-    app.add_handler(CommandHandler("hot", cmd_hot))
-    app.add_handler(CommandHandler("setter", cmd_setter))
-    app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("notify", cmd_notify))
-    app.add_handler(CommandHandler("app", cmd_app))
-    app.add_handler(CommandHandler("open", cmd_open))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("wall", cmd_wall))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("setchat", cmd_setchat))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CallbackQueryHandler(on_callback))
     # topic create/edit service messages -> capture the topic name
     svc = filters.StatusUpdate.FORUM_TOPIC_CREATED | filters.StatusUpdate.FORUM_TOPIC_EDITED
