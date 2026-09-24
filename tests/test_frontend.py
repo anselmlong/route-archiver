@@ -3,6 +3,7 @@ driven with headless Chromium via Playwright. No mocking of fetch() — this
 exercises the actual client/server contract."""
 import base64
 import json
+import os
 import socket
 import threading
 import time
@@ -14,7 +15,8 @@ from playwright.sync_api import sync_playwright
 from storage import V_ORDER
 from tests.conftest import TEST_BOT_TOKEN, sign_init_data
 
-CHROMIUM_PATH = "/opt/pw-browsers/chromium"
+# Default to Playwright's installed browser; custom runners can override it.
+CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH") or None
 
 # smallest valid PNG (1x1 transparent pixel)
 _PNG_1PX = base64.b64decode(

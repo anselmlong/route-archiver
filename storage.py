@@ -6,6 +6,7 @@ import re
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -251,6 +252,12 @@ class Storage:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+
+    def check_readiness(self):
+        """Verify the routes schema is readable without creating or changing a DB."""
+        uri = self._db_path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=1)) as conn:
+            conn.execute("SELECT id, name, grade FROM routes LIMIT 0").fetchall()
 
     def _connect(self):
         conn = sqlite3.connect(self._db_path, timeout=30)

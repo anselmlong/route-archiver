@@ -13,6 +13,28 @@ stores it, and links to a browsable mini-app. Zero behavior change for setters �
 they just keep posting route pics.
 
 ## Features
+
+### Deployment checks
+
+`/healthz` checks process liveness. `/readyz` reads the routes schema through a
+read-only SQLite connection and returns 503 if the database is missing or unreadable.
+It does not create a replacement database and does not disclose database paths.
+Use readiness for uptime alerts and liveness for process restart decisions.
+
+After starting or updating the API, run:
+
+```sh
+python smoke_deployment.py http://127.0.0.1:8160
+python smoke_deployment.py https://routes.anselmlong.com
+```
+
+These checks verify liveness, storage readiness, and the mini-app HTML, with a
+five-second timeout per request and nonzero exit on failure. They do not prove
+Telegram delivery, authenticated mutations, or photo storage health; rehearse
+those separately with a test route before calling a deployment fully verified.
+
+### Product features
+
 - **Auto-archive** — captioned route photos in the group are parsed and saved
   (name, grade, wall, setter, photo).
 - **Mini-app** (`routes.anselmlong.com`) — list of what's on the wall now,
@@ -127,6 +149,9 @@ sudo systemctl enable --now routes-bot routes-api
 ./venv/bin/python -m playwright install chromium   # first run only
 ./venv/bin/pytest tests/
 ```
+Browser tests use Playwright's installed Chromium by default. If a runner uses
+a separately installed browser, set `CHROMIUM_PATH` to its executable path.
+
 `tests/test_storage.py` / `tests/test_api.py` cover the caption parser, grade
 clamping, ratings/ticks, and every API endpoint (auth via signed Telegram
 initData, 401/404/422 error paths) against an isolated SQLite DB.
