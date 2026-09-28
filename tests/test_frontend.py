@@ -212,10 +212,11 @@ def test_user_text_is_escaped_not_executed(page):
 
 
 def test_wall_filter_narrows_grid(page):
-    page.select_option("#wall", "Left")
+    page.locator('#wallchips .chip[data-wall="Left"]').click()
+    assert page.locator('#wallchips .chip[data-wall="Left"]').get_attribute("aria-pressed") == "true"
     assert page.locator(".card").count() == 1
     assert page.locator(".nm").first.inner_text() == "Crack Line"
-    page.select_option("#wall", "")
+    page.locator('#wallchips .chip[data-wall=""]').click()
     assert page.locator(".card").count() == 2
 
 
@@ -349,7 +350,8 @@ def test_sheet_is_hidden_and_non_interactive_until_a_card_is_opened(page):
     page.wait_for_selector(".scrim.open")
     assert page.locator("#sheet").is_visible()
     page.eval_on_selector("#scrim", "el => el.click()")
-    assert not page.locator("#sheet").is_visible()
+    # the sheet slides out, so it is hidden once the exit transition ends
+    page.locator("#sheet").wait_for(state="hidden", timeout=2000)
 
 
 def test_rating_without_telegram_context_prompts_alert_not_a_request(page):
@@ -364,7 +366,7 @@ def test_rating_without_telegram_context_prompts_alert_not_a_request(page):
     got_request = {"hit": False}
     page.route("**/api/rate/**", lambda route: (got_request.__setitem__("hit", True), route.continue_()))
 
-    page.locator("#starselect span").nth(2).click()
+    page.locator("#starselect button").nth(2).click()
     page.wait_for_timeout(150)
 
     assert dialog_messages, "expected an alert() prompting to open via Telegram"
@@ -713,7 +715,7 @@ def test_close_button_exits_the_detail_sheet(page):
     page.wait_for_selector(".scrim.open")
     page.locator("#sheetclose").click()
     page.wait_for_selector(".scrim:not(.open)", state="attached")
-    assert not page.locator("#sheet").is_visible()
+    page.locator("#sheet").wait_for(state="hidden", timeout=2000)  # slides out
 
 
 def test_escape_closes_the_detail_sheet(page):
@@ -721,7 +723,7 @@ def test_escape_closes_the_detail_sheet(page):
     page.wait_for_selector(".scrim.open")
     page.keyboard.press("Escape")
     page.wait_for_selector(".scrim:not(.open)", state="attached")
-    assert not page.locator("#sheet").is_visible()
+    page.locator("#sheet").wait_for(state="hidden", timeout=2000)  # slides out
 
 
 def test_telegram_back_button_tracks_the_sheet(page):
@@ -745,7 +747,7 @@ def test_telegram_back_button_tracks_the_sheet(page):
 def test_rating_shows_an_inline_confirmation(authed_page):
     authed_page.locator(".card", has_text="Crack Line").click()
     authed_page.wait_for_selector(".scrim.open")
-    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.locator("#starselect button").nth(2).click()
     authed_page.wait_for_selector("#ratesaved:not([hidden])")
     assert "saved" in authed_page.locator("#ratesaved").inner_text()
 
@@ -775,7 +777,7 @@ def test_failed_rating_surfaces_an_error_instead_of_going_quiet(authed_page):
                       lambda route: route.fulfill(status=500, body='{"error":"boom"}'))
     authed_page.locator(".card", has_text="Crack Line").click()
     authed_page.wait_for_selector(".scrim.open")
-    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.locator("#starselect button").nth(2).click()
     authed_page.wait_for_selector("#ratesaved:not([hidden])")
     assert "bad" in authed_page.locator("#ratesaved").get_attribute("class")
 
@@ -886,7 +888,7 @@ def test_close_button_stays_reachable_after_scrolling_the_sheet(page):
     assert box["y"] - sheet["y"] < 60
     page.locator("#sheetclose").click()
     page.wait_for_selector(".scrim:not(.open)", state="attached")
-    assert not page.locator("#sheet").is_visible()
+    page.locator("#sheet").wait_for(state="hidden", timeout=2000)
 
 
 # --------------------------------------------------------------------------- #
@@ -915,21 +917,24 @@ def hostile_wall_live_server(tmp_path, monkeypatch):
     thread.join(timeout=5)
 
 
-def test_wall_names_are_escaped_in_the_filter_dropdown(hostile_wall_live_server):
+def test_wall_names_are_escaped_in_the_filter_chips(hostile_wall_live_server):
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM_PATH)
         pg = browser.new_page()
         pg.goto(hostile_wall_live_server["base_url"] + "/")
         pg.wait_for_selector(".card")
         assert pg.evaluate("window.__wallxss") is None
-        assert pg.locator("#wall img").count() == 0
-        # the payload survives as inert text in the option label...
-        assert "onerror" in pg.locator("#wall").inner_text()
-        # ...and, the part that actually breaks the feature, the option's
+        assert pg.locator("#wallchips img").count() == 0
+        # the payload survives as inert text in the chip label...
+        assert "onerror" in pg.locator("#wallchips").inner_text()
+        # ...and, the part that actually breaks the feature, the chip's
         # value is the whole wall name rather than truncating at the quote,
-        # so selecting it still filters to that wall
-        values = pg.eval_on_selector_all("#wall option", "els => els.map(e => e.value)")
-        assert '\'left"><img src=x onerror="window.__wallxss=1">\'' .strip("'") in values
+        # so tapping it still filters to that wall
+        values = pg.eval_on_selector_all("#wallchips .chip", "els => els.map(e => e.dataset.wall)")
+        wall = 'left"><img src=x onerror="window.__wallxss=1">'
+        assert wall in values
+        pg.locator("#wallchips .chip").nth(values.index(wall)).click()
+        assert pg.locator(".card").count() == 1
         browser.close()
 
 
@@ -946,7 +951,7 @@ def test_a_missing_setter_profile_does_not_break_later_writes(authed_page):
 
     authed_page.locator(".card", has_text="Crack Line").click()
     authed_page.wait_for_selector(".scrim.open")
-    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.locator("#starselect button").nth(2).click()
     authed_page.wait_for_selector("#ratesaved:not([hidden])")
     saved = authed_page.locator("#ratesaved")
     assert "bad" not in (saved.get_attribute("class") or "")
@@ -989,7 +994,7 @@ def test_a_late_rating_response_does_not_confirm_on_another_route(authed_page):
     """)
     authed_page.locator(".card", has_text="Crack Line").click()
     authed_page.wait_for_selector(".scrim.open")
-    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.locator("#starselect button").nth(2).click()
     authed_page.wait_for_function("window.__release !== null")
 
     authed_page.keyboard.press("Escape")
@@ -1162,7 +1167,7 @@ def test_escape_unwinds_the_photo_before_the_sheet(page):
 
     page.keyboard.press("Escape")
     page.wait_for_selector(".scrim:not(.open)", state="attached")
-    assert not page.locator("#sheet").is_visible()
+    page.locator("#sheet").wait_for(state="hidden", timeout=2000)  # slides out
 
 
 def test_telegram_back_unwinds_the_photo_before_the_sheet(page):
@@ -1296,7 +1301,7 @@ def test_a_failed_write_does_not_report_into_another_route(authed_page):
     """)
     authed_page.locator(".card", has_text="Crack Line").click()
     authed_page.wait_for_selector(".scrim.open")
-    authed_page.locator("#starselect span").nth(2).click()
+    authed_page.locator("#starselect button").nth(2).click()
     authed_page.wait_for_function("window.__release !== null")
 
     authed_page.keyboard.press("Escape")

@@ -43,8 +43,8 @@
   .search{width:100%;height:42px;border-radius:var(--r);border:1px solid var(--line);
     background-color:var(--panel);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23646e7d' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20.5 20.5l-4-4'/%3E%3C/svg%3E");
     background-repeat:no-repeat;background-position:13px 50%;background-size:16px;
-    padding:0 12px 0 38px;font-size:14px;margin-top:4px;transition:border-color .12s}
-  .search:hover{border-color:var(--line-2)}
+    padding:0 12px 0 38px;font-size:16px;margin-top:2px;transition:border-color .12s}
+  @media (hover:hover){.search:hover{border-color:var(--line-2)}}
   .search::placeholder{color:var(--faint)}
   .search::-webkit-search-cancel-button{-webkit-appearance:none;height:15px;width:15px;
     background:var(--faint);border-radius:50%;cursor:pointer;
@@ -53,34 +53,45 @@
     background-color:var(--panel);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238d95a3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat:no-repeat;background-position:right 11px center;background-size:16px;
     border:1px solid var(--line);border-radius:var(--r);padding:0 34px 0 12px;
-    font-size:14px;cursor:pointer;transition:border-color .12s;text-overflow:ellipsis}
-  select:hover{border-color:var(--line-2)}
+    font-size:16px;cursor:pointer;transition:border-color .12s;text-overflow:ellipsis}
+  @media (hover:hover){select:hover{border-color:var(--line-2)}}
   option{background:var(--panel);color:var(--text)}
 
-  .toolbar{display:flex;gap:10px;margin-top:12px}
-  .ctl{display:flex;flex-direction:column;gap:6px;flex:1 1 0;min-width:0}
+  .toolbar{display:flex;align-items:center;gap:8px;margin-top:10px}
+  .chips{display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;
+    -webkit-overflow-scrolling:touch;margin:-4px 0;padding:4px 0}
+  .chips::-webkit-scrollbar{display:none}
+  .chips.more{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
+  .chips.more.end{-webkit-mask-image:none;mask-image:none}
+  .chip{flex-shrink:0;height:36px;padding:0 11px;border-radius:999px;border:1px solid var(--line);
+    background:var(--panel);color:var(--muted);font-size:13.5px;font-weight:600;
+    -webkit-tap-highlight-color:transparent;transition:background .15s,color .15s,border-color .15s}
+  .chip[aria-pressed="true"]{background:var(--accent-tint);border-color:var(--accent-edge);color:var(--accent)}
+  .sortwrap{flex-shrink:0;width:114px}
+  .sortwrap select{height:36px;border-radius:999px;font-size:13.5px;font-weight:600;
+    padding:0 28px 0 12px;color:var(--muted);background-position:right 9px center}
   .ctllab,.lab{color:var(--faint);font-size:10.5px;font-weight:680;
     text-transform:uppercase;letter-spacing:.09em}
 
   /* ---- dual-thumb grade range ------------------------------------------ */
-  .filters{margin:16px 0 0}
-  .gradehead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:9px}
+  .filters{margin:14px 0 0}
+  .gradehead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px}
   #rangeLab{font-size:13.5px;font-weight:650;color:var(--text);font-variant-numeric:tabular-nums}
   .range-row{display:flex;align-items:center;gap:10px}
   .scaleend{flex-shrink:0;width:26px;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
   .scaleend.hi{text-align:right}
-  .range-wrap{position:relative;flex:1;min-width:0;height:28px}
-  .rail{position:absolute;left:0;right:0;top:12px;height:4px;border-radius:999px;background:var(--line)}
+  .range-wrap{position:relative;flex:1;min-width:0;height:40px}
+  .rail{position:absolute;left:0;right:0;top:18px;height:4px;border-radius:999px;background:var(--line)}
   .rail .fill{position:absolute;top:0;height:4px;border-radius:999px;background:var(--accent)}
-  #min,#max{position:absolute;left:0;right:0;top:0;width:100%;height:28px;margin:0;
+  #min,#max{position:absolute;left:0;right:0;top:0;width:100%;height:40px;margin:0;touch-action:none;
     -webkit-appearance:none;appearance:none;background:transparent;pointer-events:none}
   #min::-webkit-slider-thumb,#max::-webkit-slider-thumb{-webkit-appearance:none;
-    width:20px;height:20px;border-radius:50%;background:var(--text);
-    border:2px solid var(--accent);box-shadow:var(--shadow);pointer-events:all;cursor:grab}
-  #min::-moz-range-thumb,#max::-moz-range-thumb{width:20px;height:20px;border-radius:50%;
-    background:var(--text);border:2px solid var(--accent);box-shadow:var(--shadow);
+    width:26px;height:26px;border-radius:50%;background:var(--text);
+    border:3px solid var(--accent);box-shadow:0 2px 6px rgba(0,0,0,.45);pointer-events:all;cursor:grab}
+  #min::-moz-range-thumb,#max::-moz-range-thumb{width:22px;height:22px;border-radius:50%;
+    background:var(--text);border:3px solid var(--accent);box-shadow:var(--shadow);
     pointer-events:all;cursor:grab}
-  #min::-moz-range-track,#max::-moz-range-track{background:transparent;height:28px}
+  #min::-moz-range-track,#max::-moz-range-track{background:transparent;height:40px}
 
   /* ---- route strips ---------------------------------------------------- */
   .grid{display:flex;flex-direction:column;gap:8px;margin-top:14px}
@@ -89,7 +100,7 @@
     border:1px solid var(--line);border-radius:var(--r-lg);cursor:pointer;
     -webkit-tap-highlight-color:transparent;
     transition:border-color .12s,background .12s,transform .1s}
-  .card:hover{border-color:var(--line-2);background:var(--panel-2)}
+  @media (hover:hover){.card:hover{border-color:var(--line-2);background:var(--panel-2)}}
   .card:active{transform:scale(.985)}
   .thumb{position:relative;width:66px;height:66px;flex-shrink:0;border-radius:var(--r);
     overflow:hidden;background:var(--panel-2);box-shadow:inset 0 0 0 1px var(--line)}
@@ -101,7 +112,7 @@
   .wallpill{border:1px solid var(--line);border-radius:999px;padding:1px 8px;white-space:nowrap}
   .badges{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11.5px;
     font-variant-numeric:tabular-nums}
-  .badges:empty{display:none}
+  .badges:empty,.meta:empty{display:none}
   .stars{color:var(--star);font-size:11.5px;letter-spacing:.5px}
   .ratebadge{display:inline-flex;align-items:center;gap:5px}
   .starcount,.tickcount,.hotcount,.commentcount{color:var(--muted)}
@@ -126,7 +137,7 @@
     font-variant-numeric:tabular-nums}
   .backbtn{display:inline-block;margin-top:10px;background:var(--panel);border:1px solid var(--line);
     color:var(--text);border-radius:var(--r);padding:8px 13px;font-size:13px;transition:border-color .12s}
-  .backbtn:hover{border-color:var(--line-2)}
+  @media (hover:hover){.backbtn:hover{border-color:var(--line-2)}}
 
   /* ---- leaderboard ----------------------------------------------------- */
   .board{margin-top:10px}
@@ -155,13 +166,20 @@
   .tabbar button.on .ic path:first-child{fill:var(--accent-tint)}
 
   /* ---- detail sheet ----------------------------------------------------- */
-  .scrim{position:fixed;inset:0;z-index:30;display:none;background:rgba(6,8,11,.74)}
-  .scrim.open{display:block;animation:fade .16s ease}
-  .sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;display:none;background:var(--panel);
+  .scrim{position:fixed;inset:0;z-index:30;background:rgba(6,8,11,.74);opacity:0;visibility:hidden;
+    transition:opacity .28s ease,visibility 0s linear .28s}
+  .scrim.open{opacity:1;visibility:visible;transition:opacity .22s ease}
+  .sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--panel);
     border-top:1px solid var(--line);border-radius:var(--r-xl) var(--r-xl) 0 0;
-    max-height:94vh;overflow:auto;overscroll-behavior:contain;
-    box-shadow:0 -20px 50px rgba(0,0,0,.5)}
-  .sheet.open{display:block;animation:rise .22s cubic-bezier(.22,1,.36,1)}
+    max-height:94vh;max-height:94dvh;overflow:auto;overscroll-behavior:contain;
+    box-shadow:0 -20px 50px rgba(0,0,0,.5);transform:translateY(105%);visibility:hidden;
+    transition:transform .26s cubic-bezier(.4,0,1,1),visibility 0s linear .26s}
+  .sheet.open{transform:translateY(0);visibility:visible;
+    transition:transform .38s cubic-bezier(.16,1,.3,1)}
+  .sheet.dragging{transition:none}
+  .grab{position:absolute;top:8px;left:50%;z-index:4;width:40px;height:5px;margin-left:-20px;
+    border-radius:999px;background:rgba(255,255,255,.55);box-shadow:0 1px 3px rgba(0,0,0,.5);pointer-events:none}
+  html.locked,html.locked body{overflow:hidden}
   .sheet::-webkit-scrollbar{width:0}
   @keyframes rise{from{transform:translateY(26px)}to{transform:translateY(0)}}
   @keyframes fade{from{opacity:0}to{opacity:1}}
@@ -173,7 +191,11 @@
      above the fold, and a tap opens it full screen */
   .shot{position:relative;min-height:170px;background:var(--panel-2);
     border-radius:var(--r-xl) var(--r-xl) 0 0;overflow:hidden;cursor:zoom-in}
-  .shot img{display:block;width:100%;max-height:54vh;object-fit:contain}
+  .shot img{display:block;width:100%;max-height:46vh;max-height:46dvh;object-fit:contain}
+  /* once the photo's shape is known the band is sized up front, so the sheet
+     never jumps when the full image arrives */
+  .shot.sized{height:min(calc(min(100vw,720px) / var(--ar)),46vh);height:min(calc(min(100vw,720px) / var(--ar)),46dvh)}
+  .shot.sized img{height:100%}
   /* no photo on this route: a neutral tile, and none of the enlarge cues */
   .shot.nophoto{cursor:default}
   .shot.nophoto img,.shot.nophoto .zoomhint{display:none}
@@ -207,7 +229,7 @@
     background:rgba(10,12,16,.7);color:#fff;font-size:17px;line-height:1;cursor:pointer;
     display:flex;align-items:center;justify-content:center;
     -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
-  .lbclose:hover{background:rgba(10,12,16,.92)}
+  @media (hover:hover){.lbclose:hover{background:rgba(10,12,16,.92)}}
   /* a zero-height sticky bar pins the exit to the top of the sheet, so it is
      still there once a long route has been scrolled past its photo */
   .sheetbar{position:sticky;top:0;z-index:3;height:0;display:flex;
@@ -216,7 +238,7 @@
     border-radius:50%;border:1px solid rgba(255,255,255,.14);background:rgba(10,12,16,.62);
     -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;font-size:15px;
     line-height:1;display:flex;align-items:center;justify-content:center;transition:background .12s}
-  .sheetclose:hover{background:rgba(10,12,16,.85)}
+  @media (hover:hover){.sheetclose:hover{background:rgba(10,12,16,.85)}}
   .sbody{padding:16px 16px 24px}
   .sheet h2{font-size:21px;line-height:1.25;letter-spacing:-.02em;font-weight:680;
     overflow-wrap:anywhere}
@@ -231,62 +253,68 @@
   .sec{margin-top:18px;padding-top:15px;border-top:1px solid var(--line);
     display:flex;flex-direction:column;gap:10px}
   .secline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .starselect{display:inline-flex;gap:5px;font-size:25px;line-height:1;cursor:pointer;
-    user-select:none;-webkit-user-select:none}
-  .starselect span{color:var(--star-off);transition:color .1s,transform .08s}
-  .starselect span.on{color:var(--star)}
-  .starselect span:active{transform:scale(1.18)}
+  .starselect{display:inline-flex;margin-left:-8px;user-select:none;-webkit-user-select:none}
+  .starselect button{width:44px;height:44px;border:0;background:none;padding:0;font-size:27px;line-height:1;
+    color:var(--star-off);border-radius:var(--r);-webkit-tap-highlight-color:transparent;
+    transition:color .12s,transform .16s cubic-bezier(.22,1,.36,1)}
+  .starselect button.on{color:var(--star)}
+  .starselect button:active{transform:scale(1.2)}
   .avg,.tickmeta{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
   .saved{font-size:12px;color:var(--tick);white-space:nowrap;font-weight:600}
   .saved.bad{color:var(--danger)}
   .saved[hidden]{display:none}
-  .tickbtn{height:40px;padding:0 14px;border-radius:var(--r);border:1px solid var(--line);
+  .tickbtn{height:44px;padding:0 16px;-webkit-tap-highlight-color:transparent;border-radius:var(--r);border:1px solid var(--line);
     background:var(--panel-2);color:var(--text);font-size:13.5px;font-weight:620;
     transition:border-color .12s,background .12s}
-  .tickbtn:hover{border-color:var(--line-2)}
+  @media (hover:hover){.tickbtn:hover{border-color:var(--line-2)}}
   .tickbtn.on{background:var(--tick);border-color:var(--tick);color:#04130a}
+  .tickbtn:active{transform:scale(.97)}
   .gradewrap{display:inline-flex;align-items:center;gap:7px}
   .gradewrap.hidden{display:none}
   .gradelab2{color:var(--faint);font-size:11.5px;white-space:nowrap}
-  .tickgrade{width:74px;height:40px;background:var(--panel-2);border:1px solid var(--line);
-    border-radius:var(--r);padding:0 10px;font-size:13.5px;text-transform:uppercase;
+  .tickgrade{width:84px;height:44px;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:var(--r);padding:0 26px 0 10px;font-size:16px;text-transform:uppercase;background-position:right 6px center;
     text-align:center;transition:border-color .12s}
-  .tickgrade:hover{border-color:var(--line-2)}
+  @media (hover:hover){.tickgrade:hover{border-color:var(--line-2)}}
   .clist{display:flex;flex-direction:column;gap:8px}
   .crow{font-size:13.5px;line-height:1.55;padding:10px 12px;background:var(--panel-2);
     border:1px solid var(--line);border-radius:var(--r);overflow-wrap:anywhere}
   .crow .cwho{color:var(--text);font-weight:620}
   .crow .cwhen{color:var(--faint);font-size:11px;margin-left:6px}
-  .crow .cdel{color:var(--muted);background:none;border:0;font-size:11px;
-    text-decoration:underline;margin-left:8px;padding:0}
+  .crow .cdel{color:var(--muted);background:none;border:0;font-size:12px;
+    text-decoration:underline;margin-left:4px;padding:8px 6px;margin-block:-8px}
   .cempty{color:var(--faint);font-size:12.5px}
   .cnew{display:flex;gap:8px}
-  .cinput{flex:1;min-width:0;height:42px;background:var(--panel-2);border:1px solid var(--line);
-    border-radius:var(--r);padding:0 12px;font-size:13.5px;transition:border-color .12s}
-  .cinput:hover{border-color:var(--line-2)}
+  .cinput{flex:1;min-width:0;height:44px;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:var(--r);padding:0 12px;font-size:16px;transition:border-color .12s}
+  @media (hover:hover){.cinput:hover{border-color:var(--line-2)}}
   .cinput::placeholder{color:var(--faint)}
-  .cpost{flex-shrink:0;height:42px;padding:0 17px;background:var(--accent);color:var(--accent-ink);
+  .cpost{flex-shrink:0;height:44px;padding:0 17px;background:var(--accent);color:var(--accent-ink);
     border:0;border-radius:var(--r);font-size:13.5px;font-weight:700;transition:filter .12s}
-  .cpost:hover{filter:brightness(1.07)}
+  @media (hover:hover){.cpost:hover{filter:brightness(1.07)}}
   .foot{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--muted);
     font-size:12.5px;margin-top:18px;padding-top:15px;border-top:1px solid var(--line)}
   .setterlink{color:var(--muted);background:none;border:0;padding:0;font:inherit;
     text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px}
-  .setterlink:hover{color:var(--text)}
+  @media (hover:hover){.setterlink:hover{color:var(--text)}}
   .admindel{margin-left:auto;color:var(--danger);border:1px solid rgba(248,113,113,.32);
     background:transparent;border-radius:var(--r);padding:7px 12px;font-size:12.5px;
     text-decoration:none;transition:background .12s}
-  .admindel:hover{background:rgba(248,113,113,.10)}
+  @media (hover:hover){.admindel:hover{background:rgba(248,113,113,.10)}}
   .sharebtn{margin-left:10px;border:1px solid var(--line);background:transparent;
     border-radius:var(--r);padding:7px 12px;font-size:12.5px;text-decoration:none;
     transition:background .12s,border-color .12s}
-  .sharebtn:hover,.sharebtn.on{border-color:var(--line-2)}
+  @media (hover:hover){.sharebtn:hover{border-color:var(--line-2)}}
+  .sharebtn.on{border-color:var(--line-2)}
   .sharebtn.on{color:var(--accent)}
   .card.flash{animation:cardflash 1.6s ease}
   @keyframes cardflash{0%{background:var(--panel-2)}100%{background:transparent}}
 
   @media (prefers-reduced-motion:reduce){
-    *,*::before,*::after{animation:none!important;transition:none!important}
+    .sheet,.sheet.open{transform:none;transition:opacity .2s ease,visibility 0s linear .2s;opacity:0}
+    .sheet.open{opacity:1;transition:opacity .2s ease}
+    .card:active,.tickbtn:active,.starselect button:active{transform:none}
+    .card.flash{animation:none}
   }
 </style>
 </head>
@@ -304,17 +332,15 @@
     <input type="search" id="search" class="search" placeholder="Search by name or setter…">
 
     <div class="toolbar">
-      <label class="ctl"><span class="ctllab">Sort</span>
-        <select id="sort">
-          <option value="hard">Hardest first</option>
-          <option value="easy">Easiest first</option>
+      <div class="chips" id="wallchips" role="group" aria-label="Wall"></div>
+      <label class="sortwrap">
+        <select id="sort" aria-label="Sort routes">
           <option value="new" selected>Newest</option>
+          <option value="hard">Hardest</option>
+          <option value="easy">Easiest</option>
           <option value="rating">Top rated</option>
           <option value="ticks">Most sent</option>
         </select>
-      </label>
-      <label class="ctl"><span class="ctllab">Wall</span>
-        <select id="wall"><option value="">All walls</option></select>
       </label>
     </div>
 
@@ -357,6 +383,7 @@
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet">
   <div class="wrap">
+    <span class="grab" aria-hidden="true"></span>
     <div class="sheetbar"><button class="sheetclose" id="sheetclose" aria-label="Close route">&#10005;</button></div>
     <div class="shot" id="shot" role="button" tabindex="0" aria-label="View photo full screen">
       <img id="simg" alt="" onerror="markNoPhoto()">
@@ -369,9 +396,9 @@
       <div class="dd" id="sdesc" hidden></div>
 
       <div class="sec rate">
-        <span class="lab">Rate this route</span>
+        <span class="lab">Your rating</span>
         <div class="secline">
-          <span class="starselect" id="starselect"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></span>
+          <span class="starselect" id="starselect" role="group" aria-label="Your rating"><button type="button" aria-label="1 star">★</button><button type="button" aria-label="2 stars">★</button><button type="button" aria-label="3 stars">★</button><button type="button" aria-label="4 stars">★</button><button type="button" aria-label="5 stars">★</button></span>
           <span class="avg" id="savg"></span>
           <span class="saved" id="ratesaved" hidden></span>
         </div>
@@ -415,6 +442,30 @@ const state={routes:[],sort:"new",wall:"",search:"",min:0,max:1,grades:[],cur:nu
 const SUBTITLE={browse:"tap a card for details",mine:"your send history",
   board:"who's climbing and setting the most",hot:"most sent in the last 7 days",
   setter:"setter profile"};
+/* ---- Telegram-native feedback, with browser fallbacks ---- */
+const TG=()=>window.Telegram&&window.Telegram.WebApp;
+function tgVer(v){const w=TG();try{return !!(w&&w.isVersionAtLeast&&w.isVersionAtLeast(v))}catch(e){return false}}
+function haptic(kind){
+  const w=TG(); if(!w||!w.HapticFeedback||!tgVer("6.1"))return;
+  try{
+    if(kind==="select")w.HapticFeedback.selectionChanged();
+    else if(kind==="success"||kind==="error")w.HapticFeedback.notificationOccurred(kind);
+    else w.HapticFeedback.impactOccurred(kind||"light");
+  }catch(e){}
+}
+function tgAlert(msg){
+  const w=TG();
+  if(w&&w.showAlert&&tgVer("6.2")){try{w.showAlert(msg);return}catch(e){}}
+  alert(msg);
+}
+function tgConfirm(msg){
+  const w=TG();
+  if(w&&w.showConfirm&&tgVer("6.2")){
+    return new Promise(res=>{try{w.showConfirm(msg,ok=>res(!!ok))}catch(e){res(confirm(msg))}});
+  }
+  return Promise.resolve(confirm(msg));
+}
+
 function setSub(){
   const tail=SUBTITLE[state.view]||SUBTITLE.browse;
   document.querySelector("#sub").textContent=state.hello?state.hello+" \u00b7 "+tail:tail;
@@ -422,8 +473,17 @@ function setSub(){
 
 (function tg(){
   if(window.Telegram&&window.Telegram.WebApp){
-    window.Telegram.WebApp.ready();
-    window.Telegram.WebApp.expand();
+    const W=window.Telegram.WebApp;
+    W.ready();
+    W.expand();
+    // paint Telegram's own chrome in the app's colours, so the header and the
+    // strip under the tab bar read as part of the app instead of a light frame
+    const at=v=>{try{return W.isVersionAtLeast&&W.isVersionAtLeast(v)}catch(e){return false}};
+    try{if(at("6.1")){W.setHeaderColor("#0d0f13");W.setBackgroundColor("#0d0f13")}}catch(e){}
+    try{if(at("7.10"))W.setBottomBarColor("#161a20")}catch(e){}
+    // without this a downward drag inside a scrolled sheet or list minimises
+    // the whole mini-app instead of scrolling or closing the sheet
+    try{if(at("7.7"))W.disableVerticalSwipes()}catch(e){}
     if(window.Telegram.WebApp.initData) state.initData=window.Telegram.WebApp.initData;
     const glob=window.Telegram.WebApp.initDataUnsafe||{};
     const u=glob.user;
@@ -473,10 +533,32 @@ async function load(){
 }
 
 function setWallOptions(walls){
-  const sel=$("#wall");
-  sel.innerHTML='<option value="">All walls</option>'+
-    walls.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join("");
+  // one tap per wall instead of a dropdown: there are only a handful
+  const box=$("#wallchips");
+  const opts=[["","All"],...walls.map(w=>[w,w])];
+  if(state.wall&&!walls.includes(state.wall))state.wall="";
+  box.replaceChildren(...opts.map(([v,label])=>{
+    const b=document.createElement("button");
+    b.type="button";b.className="chip";b.textContent=label;b.dataset.wall=v;
+    b.setAttribute("aria-pressed",String(state.wall===v));
+    b.onclick=()=>{
+      if(state.wall===v)return;
+      state.wall=v;haptic("select");
+      box.querySelectorAll(".chip").forEach(c=>c.setAttribute("aria-pressed",String(c.dataset.wall===v)));
+      paint();
+    };
+    return b;
+  }));
+  fadeChips();
 }
+// fade the chip row's edge only while more chips sit off to the right
+function fadeChips(){
+  const box=$("#wallchips");
+  box.classList.toggle("more",box.scrollWidth>box.clientWidth+1);
+  box.classList.toggle("end",box.scrollLeft+box.clientWidth>=box.scrollWidth-2);
+}
+$("#wallchips").addEventListener("scroll",fadeChips,{passive:true});
+window.addEventListener("resize",fadeChips);
 
 /* ---- route sharing ---- */
 async function shareRoute(btn, id){
@@ -601,7 +683,33 @@ function renderGrid(list){
   $("#count").textContent=list.length+" route"+(list.length===1?"":"s");
   const grid=$("#grid"), empty=$("#empty");
   empty.hidden=!!list.length;
-  grid.innerHTML=list.map(r=>{
+  grid.replaceChildren(...list.map(cardFor));
+}
+
+// one card element per route, reused across repaints, so searching, sorting
+// and rating never tear down thumbnails and re-download them
+const cardCache=new Map();
+function cardFor(r){
+  let c=cardCache.get(r.id);
+  if(!c){
+    c=document.createElement("div");
+    c.className="card";c.dataset.id=r.id;
+    c.setAttribute("role","button");c.tabIndex=0;
+    c.innerHTML='<div class="thumb"><img loading="lazy" decoding="async" alt="" width="66" height="66"></div>'+
+      '<div class="info"><div class="nm"></div><div class="meta"></div><div class="badges"></div></div><div class="grade"></div>';
+    const img=c.querySelector("img");
+    img.onerror=()=>img.remove();
+    img.src=`/api/photo/${r.id}`;
+    c.onclick=()=>openRoute(c._r);
+    c.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openRoute(c._r)}};
+    cardCache.set(r.id,c);
+  }
+  c._r=r;
+  c.classList.remove("flash");
+  fillCard(c,r);
+  return c;
+}
+function fillCard(c,r){
     const meta=[];
     if(r.wall)meta.push(`<span class="wallpill">${esc(r.wall)}</span>`);
     if(r.setter_name)meta.push(`<span>set by ${esc(r.setter_name)}</span>`);
@@ -612,22 +720,11 @@ function renderGrid(list){
     if(r.tick_count)badges.push(`<span class="tickcount">✓ ${r.tick_count}</span>`);
     if(r.recent_ticks)badges.push(`<span class="hotcount">🔥 ${r.recent_ticks}</span>`);
     if(r.comment_count)badges.push(`<span class="commentcount">💬 ${r.comment_count}</span>`);
-    return `
-    <div class="card" data-id="${r.id}">
-      <div class="thumb"><img loading="lazy" src="/api/photo/${r.id}" alt="" onerror="this.remove()"></div>
-      <div class="info">
-        <div class="nm"></div>
-        ${meta.length?`<div class="meta">${meta.join("")}</div>`:""}
-        ${badges.length?`<div class="badges">${badges.join("")}</div>`:""}
-      </div>
-      <div class="grade">${esc(r.grade)}</div>
-    </div>`}).join("");
-
-  grid.querySelectorAll(".card").forEach(c=>{
-    const r=list.find(x=>x.id===Number(c.dataset.id));
     c.querySelector(".nm").textContent=r.name;
-    c.onclick=e=>{if(e.target.closest("button"))return;openRoute(r)};
-  });
+    c.querySelector(".meta").innerHTML=meta.join("");
+    c.querySelector(".badges").innerHTML=badges.join("");
+    c.querySelector(".grade").textContent=r.grade;
+    c.setAttribute("aria-label",`${r.name}, ${r.grade}${r.wall?", "+r.wall+" wall":""}`);
 }
 
 function updateRangeUI(){
@@ -831,29 +928,30 @@ function renderBoard(){
 
 /* ---- sheet buttons ---- */
 async function rate(id,val){
-  if(!state.initData){alert("Open via Telegram to rate (one rating per account).");return}
+  if(!state.initData){tgAlert("Open via Telegram to rate (one rating per account).");return}
   const slot=$("#ratesaved"), view=state.view;
   try{
     const res=await fetch(`/api/rate/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
-    if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
+    if(res.status===401){tgAlert("Not verified: "+(d.error||"reopen from Telegram"));return}
     if(!res.ok){flashFor(id,slot,d.error||"Couldn't save",true);return}
     if(d.avg!==undefined)findRoutes(id).forEach(r=>{r.avg_rating=d.avg;r.rating_count=d.count;r.my_rating=d.my_rating});
     if(state.view===view)renderGrid(state.curList);
     if(state.cur&&state.cur.id===id){
       refreshSheet();
       flash(slot,d.my_rating?"✓ rating saved":"✓ rating cleared");
+      haptic("success");
     }
   }catch(e){flashFor(id,slot,"Couldn't save — check connection",true)}
 }
 
 async function tick(id,val){
-  if(!state.initData){alert("Open via Telegram to tick (ticklist is per account).");return}
+  if(!state.initData){tgAlert("Open via Telegram to tick (ticklist is per account).");return}
   const view=state.view;
   try{
     const res=await fetch(`/api/tick/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
-    if(res.status===401){alert("Not verified. Reopen from Telegram.");return}
+    if(res.status===401){tgAlert("Not verified. Reopen from Telegram.");return}
     if(!res.ok){flashFor(id,$("#gradesaved"),d.error||"Couldn't save",true);return}
     if(d.ticked!==undefined)findRoutes(id).forEach(r=>{
       r.my_tick=d.ticked?1:0;r.tick_count=d.count;
@@ -863,7 +961,7 @@ async function tick(id,val){
       r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
     });
     if(state.view===view)renderGrid(state.curList);
-    if(state.cur&&state.cur.id===id)refreshSheet();
+    if(state.cur&&state.cur.id===id){refreshSheet();haptic(d.ticked?"success":"light")}
   }catch(e){flashFor(id,$("#gradesaved"),"Couldn\'t save — check connection",true)}
 }
 
@@ -920,7 +1018,11 @@ function refreshSheet(){
   $("#savg").textContent=`${fmtAvg(r.avg_rating)} ★ · ${r.rating_count||0} ratings`;
   // highlight my rating
   const sel=$("#starselect");
-  [...sel.children].forEach((s,i)=>s.className=(r.my_rating&&i<(r.my_rating))?"on":"");
+  [...sel.children].forEach((s,i)=>{
+    const on=!!(r.my_rating&&i<r.my_rating);
+    s.className=on?"on":"";
+    s.setAttribute("aria-pressed",String(r.my_rating===i+1));
+  });
   // tick state
   const t=$("#stck"), tg=$("#stckgrade"), tw=$("#stckgradewrap");
   t.className="tickbtn"+(r.my_tick?" on":"");
@@ -962,17 +1064,17 @@ function refreshSheet(){
 }
 
 async function deleteRoute(routeId){
-  if(!confirm("Delete this route? This hides it from the wall and everyone's view (ratings/ticks kept)."))return;
+  if(!await tgConfirm("Delete this route? This hides it from the wall and everyone's view (ratings/ticks kept)."))return;
   try{
     const res=await fetch(`/api/routes/${routeId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
-    if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
-    if(res.status===403){alert("Admins only.");return}
-    if(!res.ok){alert(d.error||"Couldn't delete that route.");return}
+    if(res.status===401){tgAlert("Not verified: "+(d.error||"reopen from Telegram"));return}
+    if(res.status===403){tgAlert("Admins only.");return}
+    if(!res.ok){tgAlert(d.error||"Couldn't delete that route.");return}
     closeSheet();
     await load();
-    alert("Route deleted.");
-  }catch(e){alert("Couldn't delete the route. Check your connection and try again.")}
+    tgAlert("Route deleted.");
+  }catch(e){tgAlert("Couldn't delete the route. Check your connection and try again.")}
 }
 function photoOpen(){return $("#lightbox").classList.contains("open")}
 
@@ -980,6 +1082,7 @@ function markNoPhoto(){
   // /api/photo 404s for a route archived without one; without this the band
   // would still offer "tap to enlarge" and open a full-screen black rectangle
   $("#shot").classList.add("nophoto");
+  $("#shot").classList.remove("sized");
   $("#shot").removeAttribute("tabindex");
   $("#shot").removeAttribute("role");
 }
@@ -1108,6 +1211,7 @@ function onPhotoWheel(e){
 }
 
 function openPhoto(){
+  if(sheetDrag.justDragged)return;  // the end of a swipe is not a tap
   const img=$("#simg");
   if(!state.cur||$("#shot").classList.contains("nophoto"))return;
   if(!img.getAttribute("src")||!img.naturalWidth)return;
@@ -1148,7 +1252,13 @@ function openRoute(r){
   shot.classList.remove("nophoto");
   shot.setAttribute("tabindex","0");
   shot.setAttribute("role","button");
+  // size the photo band from the list thumbnail (same image, already
+  // decoded) so the sheet doesn't jump when the full photo arrives
+  const th=document.querySelector(`.card[data-id="${r.id}"] img`);
+  if(th&&th.naturalWidth){shot.style.setProperty("--ar",th.naturalWidth/th.naturalHeight);shot.classList.add("sized")}
+  else{shot.style.removeProperty("--ar");shot.classList.remove("sized")}
   $("#simg").src=`/api/photo/${r.id}`;
+  $("#sheet").scrollTop=0;
   $("#ratesaved").hidden=true;
   $("#gradesaved").hidden=true;
   refreshSheet();
@@ -1156,6 +1266,7 @@ function openRoute(r){
   loadComments(r.id);
   $("#scrim").classList.add("open");
   $("#sheet").classList.add("open");
+  document.documentElement.classList.add("locked");
   tgBack(true);
 }
 
@@ -1213,33 +1324,34 @@ async function postComment(routeId){
   const input=$("#cinput");
   const text=input.value.trim();
   if(!text)return;
-  if(!state.initData){alert("Open via Telegram to comment.");return}
+  if(!state.initData){tgAlert("Open via Telegram to comment.");return}
   const view=state.view;
   try{
     const res=await fetch(`/api/comments/${routeId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
-    if(res.status===401){alert("Not verified: "+(d.error||"reopen from Telegram"));return}
-    if(!res.ok){alert(d.error||"Couldn't post that comment.");return}
+    if(res.status===401){tgAlert("Not verified: "+(d.error||"reopen from Telegram"));return}
+    if(!res.ok){tgAlert(d.error||"Couldn't post that comment.");return}
     input.value="";
     bumpCommentCount(routeId,1,view);
     loadComments(routeId);
-  }catch(e){alert("Couldn't post your comment. Check your connection and try again.")}
+  }catch(e){tgAlert("Couldn't post your comment. Check your connection and try again.")}
 }
 
 async function deleteComment(commentId,routeId){
   const view=state.view;
   try{
     const res=await fetch(`/api/comments/${commentId}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:state.initData})});
-    if(!res.ok){alert("Couldn't delete that comment.");return}
+    if(!res.ok){tgAlert("Couldn't delete that comment.");return}
     bumpCommentCount(routeId,-1,view);
     loadComments(routeId);
-  }catch(e){alert("Couldn't delete your comment. Check your connection and try again.")}
+  }catch(e){tgAlert("Couldn't delete your comment. Check your connection and try again.")}
 }
 function closeSheet(){
   const el=document.activeElement;
   if(el&&$("#sheet").contains(el)&&typeof el.blur==="function")el.blur();
   $("#scrim").classList.remove("open");
   $("#sheet").classList.remove("open");
+  document.documentElement.classList.remove("locked");
   closePhoto();  // after the sheet is marked closed, so back turns fully off
   state.cur=null;
   tgBack(false);
@@ -1250,6 +1362,46 @@ function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt
 
 /* ---- wire up ---- */
 $("#scrim").onclick=closeSheet;
+$("#simg").addEventListener("load",e=>{
+  const i=e.target;if(!i.naturalWidth)return;
+  $("#shot").style.setProperty("--ar",i.naturalWidth/i.naturalHeight);$("#shot").classList.add("sized");
+});
+
+/* ---- swipe the sheet down to dismiss (only from its top) ---- */
+const sheetDrag={y:0,dy:0,t:0,on:false,active:false,justDragged:false};
+(function(){
+  const sh=$("#sheet");
+  sh.addEventListener("touchstart",e=>{
+    sheetDrag.on=false;
+    if(sh.scrollTop>0||photoOpen()||e.touches.length>1)return;
+    if(e.target.closest("input,select,textarea,.starselect"))return;
+    Object.assign(sheetDrag,{y:e.touches[0].clientY,dy:0,t:Date.now(),on:true,active:false});
+  },{passive:true});
+  sh.addEventListener("touchmove",e=>{
+    if(!sheetDrag.on)return;
+    const dy=e.touches[0].clientY-sheetDrag.y;
+    if(!sheetDrag.active){
+      if(dy<-4||sh.scrollTop>0){sheetDrag.on=false;return}  // scrolling up: let it scroll
+      if(dy<8)return;
+      sheetDrag.active=true;sh.classList.add("dragging");
+    }
+    sheetDrag.dy=Math.max(0,dy);
+    sh.style.transform=`translateY(${sheetDrag.dy}px)`;
+    e.preventDefault();
+  },{passive:false});
+  const end=()=>{
+    if(!sheetDrag.on)return;
+    sheetDrag.on=false;
+    if(!sheetDrag.active)return;
+    sh.classList.remove("dragging");
+    sh.style.transform="";
+    const v=sheetDrag.dy/Math.max(1,Date.now()-sheetDrag.t);
+    sheetDrag.justDragged=true;setTimeout(()=>sheetDrag.justDragged=false,350);
+    if(sheetDrag.dy>110||v>0.55){haptic("light");closeSheet()}
+  };
+  sh.addEventListener("touchend",end);
+  sh.addEventListener("touchcancel",end);
+})();
 $("#sheetclose").onclick=closeSheet;
 $("#shot").onclick=openPhoto;
 $("#shot").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openPhoto()}};
@@ -1281,9 +1433,8 @@ document.addEventListener("keydown",e=>{
   }
   closeSheet();
 });
-$("#viewseg").querySelectorAll("button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+$("#viewseg").querySelectorAll("button").forEach(b=>b.onclick=()=>{if(b.dataset.view!==state.view)haptic("select");setView(b.dataset.view)});
 $("#sort").onchange=e=>{state.sort=e.target.value;paint()};
-$("#wall").onchange=e=>{state.wall=e.target.value;paint()};
 $("#search").oninput=e=>{state.search=e.target.value;paint()};
 // The thumbs push each other rather than stopping dead. Clamping meant that
 // once the two met, the one painted on top was pinned by the other and the
@@ -1309,8 +1460,10 @@ $("#max").onchange=e=>dragMax(+e.target.value,true);
 // star selection
 $("#starselect").onclick=e=>{
   if(!state.cur)return;
-  const idx=[...e.currentTarget.children].indexOf(e.target)+1;
+  const b=e.target.closest("button");
+  const idx=[...e.currentTarget.children].indexOf(b)+1;
   if(idx<=0)return;
+  haptic("select");
   // sending the same rating as my_rating toggles it off on the backend
   rate(state.cur.id, idx);
 };
