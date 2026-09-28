@@ -308,7 +308,7 @@
         <select id="sort">
           <option value="hard">Hardest first</option>
           <option value="easy">Easiest first</option>
-          <option value="new">Newest</option>
+          <option value="new" selected>Newest</option>
           <option value="rating">Top rated</option>
           <option value="ticks">Most sent</option>
         </select>
@@ -406,7 +406,7 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const state={routes:[],sort:"hard",wall:"",search:"",min:0,max:1,grades:[],cur:null,initData:"",
+const state={routes:[],sort:"new",wall:"",search:"",min:0,max:1,grades:[],cur:null,initData:"",
   view:"browse",curList:[],mine:null,board:null,hot:null,setter:null,isAdmin:false,hello:"",
   autoOpen:null,miniAppLink:""};
 

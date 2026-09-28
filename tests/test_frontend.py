@@ -318,11 +318,10 @@ def test_load_failure_shows_retry_and_recovers(live_server):
 
 
 def test_sort_control_is_labelled_and_reorders_the_list(page):
-    """The old segmented pair painted its selected button the same colour as
-    the strip behind it, so the active sort was invisible. A labelled select
-    shows its own state."""
-    assert page.locator("#sort").input_value() == "hard"
-    # hardest first: V6 above V4
+    """Sort defaults to newest first; switching to a grade sort reorders the
+    list, and the select reflects the active sort."""
+    assert page.locator("#sort").input_value() == "new"
+    # newest first: created later (V6 "Weird") above earlier (V4 "Crack Line")
     assert page.locator(".nm").first.inner_text().startswith("Weird")
 
     page.select_option("#sort", "easy")
