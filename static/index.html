@@ -17,11 +17,12 @@
     --shadow:0 1px 2px rgba(0,0,0,.35);
   }
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  html{-webkit-text-size-adjust:100%}
+  html{-webkit-text-size-adjust:100%;color-scheme:dark;scrollbar-color:var(--line-2) var(--bg)}
   body{background:var(--bg);color:var(--text);
     font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
     -webkit-font-smoothing:antialiased}
   button,input,select{font:inherit;color:inherit}
+  input{caret-color:var(--accent)}
   button{cursor:pointer}
   :focus-visible{outline:none;box-shadow:var(--ring)}
   ::selection{background:var(--accent);color:var(--accent-ink)}
@@ -46,6 +47,7 @@
     padding:0 12px 0 38px;font-size:16px;margin-top:2px;transition:border-color .12s}
   @media (hover:hover){.search:hover{border-color:var(--line-2)}}
   .search::placeholder{color:var(--faint)}
+  .search:focus,select:focus-visible,.cinput:focus{border-color:var(--accent-edge)}
   .search::-webkit-search-cancel-button{-webkit-appearance:none;height:15px;width:15px;
     background:var(--faint);border-radius:50%;cursor:pointer;
     -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 6l12 12M18 6L6 18' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat}
@@ -66,6 +68,7 @@
   .chip{flex-shrink:0;height:36px;padding:0 11px;border-radius:999px;border:1px solid var(--line);
     background:var(--panel);color:var(--muted);font-size:13.5px;font-weight:600;
     -webkit-tap-highlight-color:transparent;transition:background .15s,color .15s,border-color .15s}
+  @media (hover:hover){.chip[aria-pressed="false"]:hover{border-color:var(--line-2);color:var(--text)}}
   .chip[aria-pressed="true"]{background:var(--accent-tint);border-color:var(--accent-edge);color:var(--accent)}
   .sortwrap{flex-shrink:0;width:114px}
   .sortwrap select{height:36px;border-radius:999px;font-size:13.5px;font-weight:600;
@@ -123,6 +126,18 @@
     padding:7px 9px;min-width:54px;text-align:center;font-variant-numeric:tabular-nums}
   .retired{font-size:11px;color:var(--muted);border:1px solid var(--line-2);border-radius:999px;
     padding:1px 7px;text-transform:uppercase;letter-spacing:.06em;font-weight:650}
+  .skel{display:flex;align-items:center;gap:12px;height:90px;padding:10px;border-radius:var(--r-lg);
+    background:var(--panel);border:1px solid var(--line)}
+  .skel i{display:block;border-radius:var(--r-sm);background:var(--panel-2)}
+  .skel i:first-child{width:66px;height:66px;border-radius:var(--r)}
+  .skel span{flex:1;display:flex;flex-direction:column;gap:9px}
+  .skel span i{height:11px;width:58%}
+  .skel span i+i{width:34%}
+  .skel>i:last-child{width:54px;height:36px;border-radius:var(--r)}
+  @media (prefers-reduced-motion:no-preference){
+    .skel{animation:pulse 1.4s ease-in-out infinite alternate}
+    @keyframes pulse{from{opacity:1}to{opacity:.55}}
+  }
   .empty{padding:56px 16px;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.6}
   .elink{font:inherit;color:var(--accent);font-weight:620;text-decoration:underline;
     text-underline-offset:3px;background:none;border:0;padding:10px 6px;margin:-10px -6px}
@@ -150,6 +165,7 @@
     background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
     margin-bottom:7px;font-size:13.5px}
   .brow .who{font-weight:620;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .brow .rk{display:inline-block;min-width:1.6em;color:var(--faint);font-variant-numeric:tabular-nums}
   .brow .what{color:var(--muted);font-size:12.5px;flex-shrink:0;font-variant-numeric:tabular-nums}
 
   /* ---- bottom tab bar --------------------------------------------------- */
@@ -295,6 +311,7 @@
   .cpost{flex-shrink:0;height:44px;padding:0 17px;background:var(--accent);color:var(--accent-ink);
     border:0;border-radius:var(--r);font-size:13.5px;font-weight:700;transition:filter .12s}
   @media (hover:hover){.cpost:hover{filter:brightness(1.07)}}
+  .cpost:disabled{opacity:.55;cursor:default;filter:none}
   .foot{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--muted);
     font-size:12.5px;margin-top:18px;padding-top:15px;border-top:1px solid var(--line)}
   .setterlink{color:var(--muted);background:none;border:0;padding:0;font:inherit;min-height:36px;
@@ -507,6 +524,8 @@ function setSub(){
 async function load(){
   $("#empty").hidden=true;
   $("#sub").textContent="loading routes…";
+  if(!state.routes.length&&!$("#grid").children.length)
+    $("#grid").innerHTML='<div class="skel" aria-hidden="true"><i></i><span><i></i><i></i></span><i></i></div>'.repeat(4);
   try{
     const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
     const r=await fetch("/api/routes"+q).then(x=>x.json());
@@ -944,7 +963,7 @@ async function loadBoard(){
 function renderBoard(){
   const b=state.board;
   if(!b)return;
-  const medal=i=>["🥇","🥈","🥉"][i]||(i+1)+".";
+  const medal=i=>`<span class="rk">${["🥇","🥈","🥉"][i]||(i+1)+"."}</span>`;
   const climbers=b.climbers.length
     ?b.climbers.map((c,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(c.tg_user_name||"climber")}</span><span class="what">${c.ticks} send${c.ticks===1?"":"s"} · ${esc(c.hardest_grade||"—")}</span></div>`).join("")
     :'<div class="empty">No ticks yet.</div>';
@@ -1045,7 +1064,8 @@ function refreshSheet(){
   }
   $("#sname").textContent=r.name;
   const dd=$("#sdesc"); dd.hidden=!r.description; dd.textContent=r.description;
-  $("#savg").textContent=`${fmtAvg(r.avg_rating)} ★ · ${r.rating_count||0} ratings`;
+  const rc=r.rating_count||0;
+  $("#savg").textContent=`${fmtAvg(r.avg_rating)} ★ · ${rc} rating${rc===1?"":"s"}`;
   // highlight my rating
   const sel=$("#starselect");
   [...sel.children].forEach((s,i)=>{
@@ -1371,7 +1391,9 @@ async function postComment(routeId){
   const text=input.value.trim();
   if(!text)return;
   if(!state.initData){tgAlert("Open via Telegram to comment.");return}
-  const view=state.view;
+  const view=state.view, btn=$("#cpost");
+  if(btn.disabled)return;
+  btn.disabled=true;
   try{
     const res=await fetch(`/api/comments/${routeId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,init_data:state.initData})});
     const d=await res.json().catch(()=>({}));
@@ -1381,6 +1403,7 @@ async function postComment(routeId){
     bumpCommentCount(routeId,1,view);
     loadComments(routeId);
   }catch(e){tgAlert("Couldn't post your comment. Check your connection and try again.")}
+  finally{btn.disabled=false}
 }
 
 async function deleteComment(commentId,routeId){
