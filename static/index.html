@@ -327,6 +327,17 @@
   @media (hover:hover){.sharebtn:hover{border-color:var(--line-2)}}
   .sharebtn.on{border-color:var(--line-2)}
   .sharebtn.on{color:var(--accent)}
+  /* a send gets a puff of chalk off the button; a rating lands star by star */
+  .chalk{position:fixed;z-index:35;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;
+    background:rgba(240,238,232,.9);filter:blur(.6px);pointer-events:none;
+    animation:chalk .75s cubic-bezier(.16,1,.3,1) forwards}
+  @keyframes chalk{from{transform:translate(0,0) scale(.5);opacity:.95}
+    to{transform:translate(var(--dx),var(--dy)) scale(var(--s));opacity:0}}
+  .tickbtn.sent{animation:sent .42s cubic-bezier(.34,1.56,.64,1)}
+  @keyframes sent{0%{transform:scale(.94)}100%{transform:scale(1)}}
+  .starselect button.pop{animation:starpop .38s cubic-bezier(.34,1.56,.64,1) both;
+    animation-delay:calc(var(--i) * 45ms)}
+  @keyframes starpop{0%{transform:scale(.7)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
   .card.flash{animation:cardflash 1.6s ease}
   @keyframes cardflash{0%{background:var(--panel-2)}100%{background:transparent}}
 
@@ -334,7 +345,7 @@
     .sheet,.sheet.open{transform:none;transition:opacity .2s ease,visibility 0s linear .2s;opacity:0}
     .sheet.open{opacity:1;transition:opacity .2s ease}
     .card:active,.tickbtn:active,.starselect button:active{transform:none}
-    .card.flash{animation:none}
+    .card.flash,.tickbtn.sent,.starselect button.pop{animation:none}
   }
 </style>
 </head>
@@ -636,6 +647,38 @@ function sortList(l){
     case "ticks":  return c.sort((a,b)=>(b.tick_count||0)-(a.tick_count||0)||byNew(a,b));
     default:       return c.sort((a,b)=>key(b,false)-key(a,false)||byNew(a,b));
   }
+}
+
+const calm=()=>window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function chalkPuff(btn){
+  // logging a send is the moment the app exists for: a small puff of chalk
+  // drifts off the button, the way a hand leaves the bag
+  if(calm())return;
+  btn.classList.remove("sent");void btn.offsetWidth;btn.classList.add("sent");
+  const b=btn.getBoundingClientRect();
+  for(let i=0;i<9;i++){
+    const d=document.createElement("span");
+    d.className="chalk";d.setAttribute("aria-hidden","true");
+    const a=-Math.PI*(.08+.84*Math.random()), dist=22+Math.random()*30;
+    d.style.left=(b.left+b.width*(.2+.6*Math.random()))+"px";
+    d.style.top=(b.top+b.height*.45)+"px";
+    d.style.setProperty("--dx",(Math.cos(a)*dist).toFixed(1)+"px");
+    d.style.setProperty("--dy",(Math.sin(a)*dist-6).toFixed(1)+"px");
+    d.style.setProperty("--s",(1.4+Math.random()*1.4).toFixed(2));
+    d.style.animationDelay=(Math.random()*60|0)+"ms";
+    d.addEventListener("animationend",()=>d.remove());
+    document.body.appendChild(d);
+  }
+}
+
+function popStars(){
+  if(calm())return;
+  [...$("#starselect").children].forEach((s,i)=>{
+    if(!s.classList.contains("on"))return;
+    s.style.setProperty("--i",i);
+    s.classList.remove("pop");void s.offsetWidth;s.classList.add("pop");
+  });
 }
 
 function flashFor(id,el,msg,bad){
@@ -989,6 +1032,7 @@ async function rate(id,val){
     if(state.cur&&state.cur.id===id){
       refreshSheet();
       flash(slot,d.my_rating?"✓ rating saved":"✓ rating cleared");
+      if(d.my_rating)popStars();
       haptic("success");
     }
   }catch(e){flashFor(id,slot,"Couldn't save — check connection",true)}
@@ -1010,7 +1054,10 @@ async function tick(id,val){
       r.consensus_grade=d.consensus_grade;r.consensus_count=d.consensus_count;
     });
     if(state.view===view)renderGrid(state.curList);
-    if(state.cur&&state.cur.id===id){refreshSheet();haptic(d.ticked?"success":"light")}
+    if(state.cur&&state.cur.id===id){
+      refreshSheet();haptic(d.ticked?"success":"light");
+      if(d.ticked)chalkPuff($("#stck"));
+    }
   }catch(e){flashFor(id,$("#gradesaved"),"Couldn\'t save — check connection",true)}
 }
 
