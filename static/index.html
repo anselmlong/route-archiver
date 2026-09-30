@@ -8,7 +8,7 @@
 <style>
   :root{
     --bg:#0d0f13; --panel:#161a20; --panel-2:#1b2029; --line:#242a34; --line-2:#333b49;
-    --text:#e8eaef; --muted:#8d95a3; --faint:#7b8595;
+    --text:#e8eaef; --muted:#8d95a3; --faint:#818b9b;
     --accent:#f5a524; --accent-ink:#1b1204; --accent-tint:rgba(245,165,36,.10);
     --accent-edge:rgba(245,165,36,.28);
     --star:#f5a524; --star-off:#5d6778; --tick:#31c48d; --danger:#f87171;
@@ -26,6 +26,7 @@
   button{cursor:pointer}
   :focus-visible{outline:none;box-shadow:var(--ring)}
   ::selection{background:var(--accent);color:var(--accent-ink)}
+  .sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .wrap{max-width:720px;margin:0 auto;padding:0 16px 108px}
 
   /* ---- header ---------------------------------------------------------- */
@@ -70,7 +71,7 @@
     -webkit-tap-highlight-color:transparent;transition:background .15s,color .15s,border-color .15s}
   @media (hover:hover){.chip[aria-pressed="false"]:hover{border-color:var(--line-2);color:var(--text)}}
   .chip[aria-pressed="true"]{background:var(--accent-tint);border-color:var(--accent-edge);color:var(--accent)}
-  .sortwrap{flex-shrink:0;width:114px}
+  .sortwrap{flex-shrink:0;width:124px}
   .sortwrap select{height:36px;border-radius:999px;font-size:13.5px;font-weight:600;
     padding:0 28px 0 12px;color:var(--muted);background-position:right 9px center}
   .ctllab,.lab{color:var(--faint);font-size:11px;font-weight:680;
@@ -134,6 +135,7 @@
   .skel span i{height:11px;width:58%}
   .skel span i+i{width:34%}
   .skel>i:last-child{width:54px;height:36px;border-radius:var(--r)}
+  .skel.row{height:46px;margin-bottom:7px;border-radius:var(--r)}
   @media (prefers-reduced-motion:no-preference){
     .skel{animation:pulse 1.4s ease-in-out infinite alternate}
     @keyframes pulse{from{opacity:1}to{opacity:.55}}
@@ -150,6 +152,11 @@
     font-variant-numeric:tabular-nums}
   .pbar{flex:1;height:8px;background:var(--line);border-radius:999px;overflow:hidden}
   .pbar div{height:100%;background:var(--accent);border-radius:999px}
+  /* your pyramid builds up grade by grade, hardest first, each time you open it */
+  @media (prefers-reduced-motion:no-preference){
+    .pbar div{animation:grow .7s cubic-bezier(.16,1,.3,1) both;animation-delay:calc(80ms + var(--i) * 55ms)}
+    @keyframes grow{from{clip-path:inset(0 100% 0 0 round 999px)}to{clip-path:inset(0 0 0 0 round 999px)}}
+  }
   .pc{width:22px;font-size:11.5px;color:var(--muted);text-align:right;flex-shrink:0;
     font-variant-numeric:tabular-nums}
   .backbtn{display:inline-block;min-height:40px;margin-top:10px;background:var(--panel);border:1px solid var(--line);
@@ -167,6 +174,10 @@
   .brow .who{font-weight:620;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .brow .rk{display:inline-block;min-width:1.6em;color:var(--faint);font-variant-numeric:tabular-nums}
   .brow .what{color:var(--muted);font-size:12.5px;flex-shrink:0;font-variant-numeric:tabular-nums}
+  .brow .what b{color:var(--text);font-weight:650}
+  .brow.me{background:var(--accent-tint);border-color:var(--accent-edge)}
+  .you{margin-left:6px;padding:1px 7px;border-radius:999px;background:var(--accent);color:var(--accent-ink);
+    font-size:11px;font-weight:700;letter-spacing:.02em;vertical-align:1px}
 
   /* ---- bottom tab bar --------------------------------------------------- */
   /* sits under the scrim (30) and sheet (31), so an open sheet covers it */
@@ -203,8 +214,6 @@
   @keyframes rise{from{transform:translateY(26px)}to{transform:translateY(0)}}
   @keyframes fade{from{opacity:0}to{opacity:1}}
   .sheet .wrap{max-width:720px;margin:0 auto;padding:0}
-  /* a fixed photo band keeps the route name above the fold whatever the
-     aspect ratio of the shot, and leaves a neutral tile if it fails to load */
   /* a route photo is the point of the route, so it is never cropped: the
      band takes its height from the shot itself, capped so the name stays
      above the fold, and a tap opens it full screen */
@@ -292,8 +301,8 @@
   .gradewrap.hidden{display:none}
   .gradelab2{color:var(--faint);font-size:11.5px;white-space:nowrap}
   .tickgrade{width:84px;height:44px;background:var(--panel-2);border:1px solid var(--line);
-    border-radius:var(--r);padding:0 26px 0 10px;font-size:16px;text-transform:uppercase;background-position:right 6px center;
-    text-align:center;transition:border-color .12s}
+    border-radius:var(--r);padding:0 24px 0 8px;font-size:16px;text-transform:uppercase;background-position:right 6px center;
+    text-align:center;text-align-last:center;font-variant-numeric:tabular-nums;transition:border-color .12s}
   @media (hover:hover){.tickgrade:hover{border-color:var(--line-2)}}
   .clist{display:flex;flex-direction:column;gap:8px}
   .crow{font-size:13.5px;line-height:1.55;padding:10px 12px;background:var(--panel-2);
@@ -301,7 +310,7 @@
   .crow .cwho{color:var(--text);font-weight:620}
   .crow .cwhen{color:var(--faint);font-size:11px;margin-left:6px}
   .crow .cdel{color:var(--muted);background:none;border:0;font-size:12px;
-    text-decoration:underline;margin-left:4px;padding:8px 6px;margin-block:-8px}
+    text-decoration:underline;text-underline-offset:2px;margin-left:2px;padding:12px 8px;margin-block:-12px}
   .cempty{color:var(--faint);font-size:12.5px}
   .cnew{display:flex;gap:8px}
   .cinput{flex:1;min-width:0;height:44px;background:var(--panel-2);border:1px solid var(--line);
@@ -325,8 +334,7 @@
     border-radius:var(--r);padding:7px 12px;font-size:12.5px;text-decoration:none;
     transition:background .12s,border-color .12s}
   @media (hover:hover){.sharebtn:hover{border-color:var(--line-2)}}
-  .sharebtn.on{border-color:var(--line-2)}
-  .sharebtn.on{color:var(--accent)}
+  .sharebtn.on{border-color:var(--line-2);color:var(--accent)}
   /* a send gets a puff of chalk off the button; a rating lands star by star */
   .chalk{position:fixed;z-index:35;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;
     background:rgba(240,238,232,.9);filter:blur(.6px);pointer-events:none;
@@ -411,6 +419,8 @@
   <span class="zoomlevel" id="zoomlevel">1.0&times;</span>
 </div>
 
+<div class="sr" id="announce" role="status" aria-live="polite"></div>
+
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sname">
   <div class="wrap">
@@ -466,7 +476,7 @@
 const $=s=>document.querySelector(s);
 const state={routes:[],sort:"new",wall:"",search:"",min:0,max:1,grades:[],cur:null,initData:"",
   view:"browse",curList:[],mine:null,board:null,hot:null,setter:null,isAdmin:false,hello:"",
-  autoOpen:null,miniAppLink:""};
+  autoOpen:null,miniAppLink:"",userId:null};
 
 // each view gets its own caption, so the header stops telling people to tap a
 // card on the two views that have none
@@ -519,6 +529,7 @@ function setSub(){
     const glob=window.Telegram.WebApp.initDataUnsafe||{};
     const u=glob.user;
     if(u&&u.first_name){state.hello="hey "+u.first_name;setSub()}
+    if(u&&u.id)state.userId=u.id;
     // a shared route link lands here as ?startapp=r<id>; stash it so load()
     // can jump straight to that route once the collection is fetched
     if(typeof glob.start_param==="string")state.autoOpen=glob.start_param;
@@ -536,11 +547,11 @@ async function load(){
   $("#empty").hidden=true;
   $("#sub").textContent="loading routes…";
   if(!state.routes.length&&!$("#grid").children.length)
-    $("#grid").innerHTML='<div class="skel" aria-hidden="true"><i></i><span><i></i><i></i></span><i></i></div>'.repeat(4);
+    listLoading();
   try{
     const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
-    const r=await fetch("/api/routes"+q).then(x=>x.json());
-    const k=await fetch("/api/meta").then(x=>x.json());
+    const [r,k]=await Promise.all([fetch("/api/routes"+q).then(x=>x.json()),
+      fetch("/api/meta").then(x=>x.json())]);
     if(!r||!Array.isArray(r.routes)||!k||!Array.isArray(k.grades))throw new Error("bad payload");
     state.routes=r.routes; state.grades=k.grades;
     state.miniAppLink=k.mini_app_link||"";
@@ -560,9 +571,19 @@ async function load(){
     state.curList=[];
     const empty=$("#empty");
     empty.hidden=false;
-    empty.innerHTML='Couldn\'t load routes. <a href="#" id="retry" class="elink">Retry</a>';
-    $("#retry").onclick=ev=>{ev.preventDefault();load()};
+    empty.innerHTML='Couldn\'t load routes. <button type="button" id="retry" class="elink">Retry</button>';
+    $("#retry").onclick=load;
   }
+}
+
+// placeholder rows in the list's own shape. A view that is still fetching
+// shows these rather than the last view's cards, which would open on a tap
+const SKEL='<div class="skel" aria-hidden="true"><i></i><span><i></i><i></i></span><i></i></div>';
+function listLoading(){
+  $("#grid").innerHTML=SKEL.repeat(4);
+  $("#empty").hidden=true;
+  $("#count").textContent="";
+  state.curList=[];
 }
 
 function setWallOptions(walls){
@@ -693,6 +714,8 @@ function flash(el,msg,bad){
   el.hidden=false;
   el.textContent=msg;
   el.className="saved"+(bad?" bad":"");
+  // the inline note is visual; screen readers hear it through one live region
+  const a=$("#announce");a.textContent="";setTimeout(()=>{a.textContent=msg.replace(/^✓\s*/,"")},30);
   clearTimeout(el._t);
   el._t=setTimeout(()=>{el.hidden=true},2400);
 }
@@ -831,6 +854,8 @@ function updateRangeUI(){
   const pL=(state.min/n)*100, pR=100-(state.max/n)*100;
   $("#dFill").style.left=pL+"%";
   $("#dFill").style.width=(100-pL-pR)+"%";
+  $("#min").setAttribute("aria-valuetext",gn(state.min));
+  $("#max").setAttribute("aria-valuetext",gn(state.max));
   // the two inputs overlap, so whichever is painted on top wins the touch.
   // Once min reaches the top of the scale, max has nowhere left to go and
   // the range would be stuck shut, so hand the grab to min instead.
@@ -876,6 +901,8 @@ async function loadMine(){
     return;
   }
   $("#sub").textContent="loading your ticks…";
+  $("#mineStats").innerHTML="";
+  listLoading();
   try{
     const d=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
     if(!d||!Array.isArray(d.routes))throw new Error(d&&d.error||"no history");
@@ -899,7 +926,7 @@ function renderMine(){
   const who=esc(m.name||"You");
   $("#mineStats").innerHTML=m.count
     ?`<div class="mrow"><b>${who}</b> · <b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></div>`+
-      bars.map(([g,c])=>`<div class="pyr"><span class="pg">${esc(g)}</span><div class="pbar"><div style="width:${c/max*100}%"></div></div><span class="pc">${c}</span></div>`).join("")
+      bars.map(([g,c],i)=>`<div class="pyr"><span class="pg">${esc(g)}</span><div class="pbar"><div style="width:${c/max*100}%;--i:${i}"></div></div><span class="pc">${c}</span></div>`).join("")
     :`<div class="mrow"><b>${who}</b> · no sends logged yet</div>`;
   $("#count").textContent="";
   $("#empty").textContent="No ticks yet — open a route and mark it sent.";
@@ -908,6 +935,8 @@ function renderMine(){
 
 async function loadHot(){
   $("#sub").textContent="loading this week's hot routes…";
+  $("#hotStats").innerHTML="";
+  listLoading();
   try{
     let q="/api/hot";
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
@@ -949,8 +978,9 @@ async function openSetter(setterId){
   $("#grid").hidden=false;
   $("#empty").hidden=true;
   $("#setterStats").hidden=false;
-  $("#setterStats").innerHTML='<div class="empty">loading…</div>';
+  $("#setterStats").innerHTML="";
   $("#sub").textContent="loading setter…";
+  listLoading();
   try{
     let q="/api/setter/"+setterId;
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
@@ -994,7 +1024,7 @@ function renderSetter(){
 }
 
 async function loadBoard(){
-  $("#board").innerHTML='<div class="empty">loading…</div>';
+  if(!state.board)$("#board").innerHTML='<div class="skel row" aria-hidden="true"></div>'.repeat(5);
   try{
     state.board=await fetch("/api/leaderboard").then(x=>x.json());
     renderBoard();
@@ -1006,12 +1036,15 @@ async function loadBoard(){
 function renderBoard(){
   const b=state.board;
   if(!b)return;
+  // your own row is marked, so finding yourself on the board takes no scanning
+  const me=id=>state.userId!=null&&id===state.userId;
+  const you=id=>me(id)?' <span class="you">you</span>':"";
   const medal=i=>`<span class="rk">${["🥇","🥈","🥉"][i]||(i+1)+"."}</span>`;
   const climbers=b.climbers.length
-    ?b.climbers.map((c,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(c.tg_user_name||"climber")}</span><span class="what">${c.ticks} send${c.ticks===1?"":"s"} · ${esc(c.hardest_grade||"—")}</span></div>`).join("")
+    ?b.climbers.map((c,i)=>`<div class="brow${me(c.tg_user_id)?" me":""}"><span class="who">${medal(i)} ${esc(c.tg_user_name||"climber")}${you(c.tg_user_id)}</span><span class="what">${c.ticks} send${c.ticks===1?"":"s"} · <b>${esc(c.hardest_grade||"—")}</b></span></div>`).join("")
     :'<div class="empty">No ticks yet.</div>';
   const setters=b.setters.length
-    ?b.setters.map((s,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(s.setter_name||"setter")}</span><span class="what">${s.routes_set} route${s.routes_set===1?"":"s"} set</span></div>`).join("")
+    ?b.setters.map((s,i)=>`<div class="brow${me(s.setter_id)?" me":""}"><span class="who">${medal(i)} ${esc(s.setter_name||"setter")}${you(s.setter_id)}</span><span class="what">${s.routes_set} route${s.routes_set===1?"":"s"} set</span></div>`).join("")
     :'<div class="empty">No routes set yet.</div>';
   // the headings are uppercase micro-labels like the rest of the app's
   // section labels, so an emoji in front of them is just noise
@@ -1325,6 +1358,7 @@ function openPhoto(){
   if(!state.cur||$("#shot").classList.contains("nophoto"))return;
   if(!img.getAttribute("src")||!img.naturalWidth)return;
   $("#lbimg").src=img.src;
+  $("#lbimg").alt="Photo of "+state.cur.name;
   resetZoom();  // never inherit the last photo's zoom
   $("#lightbox").classList.add("open");
   setBehindInert(true);
