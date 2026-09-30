@@ -8,7 +8,7 @@
 <style>
   :root{
     --bg:#0d0f13; --panel:#161a20; --panel-2:#1b2029; --line:#242a34; --line-2:#333b49;
-    --text:#e8eaef; --muted:#8d95a3; --faint:#7b8595;
+    --text:#e8eaef; --muted:#8d95a3; --faint:#818b9b;
     --accent:#f5a524; --accent-ink:#1b1204; --accent-tint:rgba(245,165,36,.10);
     --accent-edge:rgba(245,165,36,.28);
     --star:#f5a524; --star-off:#5d6778; --tick:#31c48d; --danger:#f87171;
@@ -26,6 +26,7 @@
   button{cursor:pointer}
   :focus-visible{outline:none;box-shadow:var(--ring)}
   ::selection{background:var(--accent);color:var(--accent-ink)}
+  .sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .wrap{max-width:720px;margin:0 auto;padding:0 16px 108px}
 
   /* ---- header ---------------------------------------------------------- */
@@ -134,6 +135,7 @@
   .skel span i{height:11px;width:58%}
   .skel span i+i{width:34%}
   .skel>i:last-child{width:54px;height:36px;border-radius:var(--r)}
+  .skel.row{height:46px;margin-bottom:7px;border-radius:var(--r)}
   @media (prefers-reduced-motion:no-preference){
     .skel{animation:pulse 1.4s ease-in-out infinite alternate}
     @keyframes pulse{from{opacity:1}to{opacity:.55}}
@@ -301,7 +303,7 @@
   .crow .cwho{color:var(--text);font-weight:620}
   .crow .cwhen{color:var(--faint);font-size:11px;margin-left:6px}
   .crow .cdel{color:var(--muted);background:none;border:0;font-size:12px;
-    text-decoration:underline;margin-left:4px;padding:8px 6px;margin-block:-8px}
+    text-decoration:underline;text-underline-offset:2px;margin-left:2px;padding:12px 8px;margin-block:-12px}
   .cempty{color:var(--faint);font-size:12.5px}
   .cnew{display:flex;gap:8px}
   .cinput{flex:1;min-width:0;height:44px;background:var(--panel-2);border:1px solid var(--line);
@@ -410,6 +412,8 @@
   <img id="lbimg" alt="Route photo">
   <span class="zoomlevel" id="zoomlevel">1.0&times;</span>
 </div>
+
+<div class="sr" id="announce" role="status" aria-live="polite"></div>
 
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sname">
@@ -536,11 +540,11 @@ async function load(){
   $("#empty").hidden=true;
   $("#sub").textContent="loading routes…";
   if(!state.routes.length&&!$("#grid").children.length)
-    $("#grid").innerHTML='<div class="skel" aria-hidden="true"><i></i><span><i></i><i></i></span><i></i></div>'.repeat(4);
+    listLoading();
   try{
     const q=state.initData?("?tg="+encodeURIComponent(state.initData)):"";
-    const r=await fetch("/api/routes"+q).then(x=>x.json());
-    const k=await fetch("/api/meta").then(x=>x.json());
+    const [r,k]=await Promise.all([fetch("/api/routes"+q).then(x=>x.json()),
+      fetch("/api/meta").then(x=>x.json())]);
     if(!r||!Array.isArray(r.routes)||!k||!Array.isArray(k.grades))throw new Error("bad payload");
     state.routes=r.routes; state.grades=k.grades;
     state.miniAppLink=k.mini_app_link||"";
@@ -560,9 +564,19 @@ async function load(){
     state.curList=[];
     const empty=$("#empty");
     empty.hidden=false;
-    empty.innerHTML='Couldn\'t load routes. <a href="#" id="retry" class="elink">Retry</a>';
-    $("#retry").onclick=ev=>{ev.preventDefault();load()};
+    empty.innerHTML='Couldn\'t load routes. <button type="button" id="retry" class="elink">Retry</button>';
+    $("#retry").onclick=load;
   }
+}
+
+// placeholder rows in the list's own shape. A view that is still fetching
+// shows these rather than the last view's cards, which would open on a tap
+const SKEL='<div class="skel" aria-hidden="true"><i></i><span><i></i><i></i></span><i></i></div>';
+function listLoading(){
+  $("#grid").innerHTML=SKEL.repeat(4);
+  $("#empty").hidden=true;
+  $("#count").textContent="";
+  state.curList=[];
 }
 
 function setWallOptions(walls){
@@ -693,6 +707,8 @@ function flash(el,msg,bad){
   el.hidden=false;
   el.textContent=msg;
   el.className="saved"+(bad?" bad":"");
+  // the inline note is visual; screen readers hear it through one live region
+  const a=$("#announce");a.textContent="";setTimeout(()=>{a.textContent=msg.replace(/^✓\s*/,"")},30);
   clearTimeout(el._t);
   el._t=setTimeout(()=>{el.hidden=true},2400);
 }
@@ -831,6 +847,8 @@ function updateRangeUI(){
   const pL=(state.min/n)*100, pR=100-(state.max/n)*100;
   $("#dFill").style.left=pL+"%";
   $("#dFill").style.width=(100-pL-pR)+"%";
+  $("#min").setAttribute("aria-valuetext",gn(state.min));
+  $("#max").setAttribute("aria-valuetext",gn(state.max));
   // the two inputs overlap, so whichever is painted on top wins the touch.
   // Once min reaches the top of the scale, max has nowhere left to go and
   // the range would be stuck shut, so hand the grab to min instead.
@@ -876,6 +894,8 @@ async function loadMine(){
     return;
   }
   $("#sub").textContent="loading your ticks…";
+  $("#mineStats").innerHTML="";
+  listLoading();
   try{
     const d=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
     if(!d||!Array.isArray(d.routes))throw new Error(d&&d.error||"no history");
@@ -908,6 +928,8 @@ function renderMine(){
 
 async function loadHot(){
   $("#sub").textContent="loading this week's hot routes…";
+  $("#hotStats").innerHTML="";
+  listLoading();
   try{
     let q="/api/hot";
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
@@ -949,8 +971,9 @@ async function openSetter(setterId){
   $("#grid").hidden=false;
   $("#empty").hidden=true;
   $("#setterStats").hidden=false;
-  $("#setterStats").innerHTML='<div class="empty">loading…</div>';
+  $("#setterStats").innerHTML="";
   $("#sub").textContent="loading setter…";
+  listLoading();
   try{
     let q="/api/setter/"+setterId;
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
@@ -994,7 +1017,7 @@ function renderSetter(){
 }
 
 async function loadBoard(){
-  $("#board").innerHTML='<div class="empty">loading…</div>';
+  if(!state.board)$("#board").innerHTML='<div class="skel row" aria-hidden="true"></div>'.repeat(5);
   try{
     state.board=await fetch("/api/leaderboard").then(x=>x.json());
     renderBoard();
@@ -1325,6 +1348,7 @@ function openPhoto(){
   if(!state.cur||$("#shot").classList.contains("nophoto"))return;
   if(!img.getAttribute("src")||!img.naturalWidth)return;
   $("#lbimg").src=img.src;
+  $("#lbimg").alt="Photo of "+state.cur.name;
   resetZoom();  // never inherit the last photo's zoom
   $("#lightbox").classList.add("open");
   setBehindInert(true);
