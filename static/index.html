@@ -71,7 +71,7 @@
     -webkit-tap-highlight-color:transparent;transition:background .15s,color .15s,border-color .15s}
   @media (hover:hover){.chip[aria-pressed="false"]:hover{border-color:var(--line-2);color:var(--text)}}
   .chip[aria-pressed="true"]{background:var(--accent-tint);border-color:var(--accent-edge);color:var(--accent)}
-  .sortwrap{flex-shrink:0;width:114px}
+  .sortwrap{flex-shrink:0;width:124px}
   .sortwrap select{height:36px;border-radius:999px;font-size:13.5px;font-weight:600;
     padding:0 28px 0 12px;color:var(--muted);background-position:right 9px center}
   .ctllab,.lab{color:var(--faint);font-size:11px;font-weight:680;
@@ -169,6 +169,7 @@
   .brow .who{font-weight:620;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .brow .rk{display:inline-block;min-width:1.6em;color:var(--faint);font-variant-numeric:tabular-nums}
   .brow .what{color:var(--muted);font-size:12.5px;flex-shrink:0;font-variant-numeric:tabular-nums}
+  .brow .what b{color:var(--text);font-weight:650}
 
   /* ---- bottom tab bar --------------------------------------------------- */
   /* sits under the scrim (30) and sheet (31), so an open sheet covers it */
@@ -205,8 +206,6 @@
   @keyframes rise{from{transform:translateY(26px)}to{transform:translateY(0)}}
   @keyframes fade{from{opacity:0}to{opacity:1}}
   .sheet .wrap{max-width:720px;margin:0 auto;padding:0}
-  /* a fixed photo band keeps the route name above the fold whatever the
-     aspect ratio of the shot, and leaves a neutral tile if it fails to load */
   /* a route photo is the point of the route, so it is never cropped: the
      band takes its height from the shot itself, capped so the name stays
      above the fold, and a tap opens it full screen */
@@ -294,8 +293,8 @@
   .gradewrap.hidden{display:none}
   .gradelab2{color:var(--faint);font-size:11.5px;white-space:nowrap}
   .tickgrade{width:84px;height:44px;background:var(--panel-2);border:1px solid var(--line);
-    border-radius:var(--r);padding:0 26px 0 10px;font-size:16px;text-transform:uppercase;background-position:right 6px center;
-    text-align:center;transition:border-color .12s}
+    border-radius:var(--r);padding:0 24px 0 8px;font-size:16px;text-transform:uppercase;background-position:right 6px center;
+    text-align:center;text-align-last:center;font-variant-numeric:tabular-nums;transition:border-color .12s}
   @media (hover:hover){.tickgrade:hover{border-color:var(--line-2)}}
   .clist{display:flex;flex-direction:column;gap:8px}
   .crow{font-size:13.5px;line-height:1.55;padding:10px 12px;background:var(--panel-2);
@@ -327,8 +326,7 @@
     border-radius:var(--r);padding:7px 12px;font-size:12.5px;text-decoration:none;
     transition:background .12s,border-color .12s}
   @media (hover:hover){.sharebtn:hover{border-color:var(--line-2)}}
-  .sharebtn.on{border-color:var(--line-2)}
-  .sharebtn.on{color:var(--accent)}
+  .sharebtn.on{border-color:var(--line-2);color:var(--accent)}
   /* a send gets a puff of chalk off the button; a rating lands star by star */
   .chalk{position:fixed;z-index:35;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;
     background:rgba(240,238,232,.9);filter:blur(.6px);pointer-events:none;
@@ -1031,7 +1029,7 @@ function renderBoard(){
   if(!b)return;
   const medal=i=>`<span class="rk">${["🥇","🥈","🥉"][i]||(i+1)+"."}</span>`;
   const climbers=b.climbers.length
-    ?b.climbers.map((c,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(c.tg_user_name||"climber")}</span><span class="what">${c.ticks} send${c.ticks===1?"":"s"} · ${esc(c.hardest_grade||"—")}</span></div>`).join("")
+    ?b.climbers.map((c,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(c.tg_user_name||"climber")}</span><span class="what">${c.ticks} send${c.ticks===1?"":"s"} · <b>${esc(c.hardest_grade||"—")}</b></span></div>`).join("")
     :'<div class="empty">No ticks yet.</div>';
   const setters=b.setters.length
     ?b.setters.map((s,i)=>`<div class="brow"><span class="who">${medal(i)} ${esc(s.setter_name||"setter")}</span><span class="what">${s.routes_set} route${s.routes_set===1?"":"s"} set</span></div>`).join("")
