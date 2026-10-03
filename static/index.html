@@ -295,6 +295,12 @@
   .avg,.tickmeta{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
   .saved{font-size:12px;color:var(--tick);white-space:nowrap;font-weight:600}
   .saved.bad{color:var(--danger)}
+  /* first send on the wall: the note takes the accent and rises into place */
+  .saved.fa{color:var(--accent);font-weight:700}
+  @media (prefers-reduced-motion:no-preference){
+    .saved.fa{animation:fa .5s cubic-bezier(.16,1,.3,1) both}
+    @keyframes fa{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  }
   .saved[hidden]{display:none}
   .tickbtn{height:44px;padding:0 16px;-webkit-tap-highlight-color:transparent;border-radius:var(--r);border:1px solid var(--line);
     background:var(--panel-2);color:var(--text);font-size:13.5px;font-weight:620;
@@ -714,16 +720,16 @@ function flashFor(id,el,msg,bad){
   if(state.cur&&state.cur.id===id)flash(el,msg,bad);
 }
 
-function flash(el,msg,bad){
+function flash(el,msg,bad,tone,ms){
   // inline write confirmation: stays next to the control that was touched,
   // and doubles as the error slot so a failed write is never silent
   el.hidden=false;
   el.textContent=msg;
-  el.className="saved"+(bad?" bad":"");
+  el.className="saved"+(bad?" bad":"")+(tone?" "+tone:"");
   // the inline note is visual; screen readers hear it through one live region
   const a=$("#announce");a.textContent="";setTimeout(()=>{a.textContent=msg.replace(/^✓\s*/,"")},30);
   clearTimeout(el._t);
-  el._t=setTimeout(()=>{el.hidden=true},2400);
+  el._t=setTimeout(()=>{el.hidden=true},ms||2400);
 }
 
 function stars(d){
@@ -1096,6 +1102,10 @@ async function tick(id,val){
     if(state.cur&&state.cur.id===id){
       refreshSheet();haptic(d.ticked?"success":"light");
       if(d.ticked)chalkPuff($("#stck"));
+      // nobody else has this one ticked: in climbing that is the FA, and it
+      // gets said out loud once, at the moment it happens
+      if(d.ticked&&d.count===1)flash($("#gradesaved"),"First ascent!",false,"fa",3600);
+      else if(!d.ticked&&$("#gradesaved").classList.contains("fa"))$("#gradesaved").hidden=true;
     }
   }catch(e){flashFor(id,$("#gradesaved"),"Couldn\'t save — check connection",true)}
 }
@@ -1183,7 +1193,7 @@ function refreshSheet(){
     tg.value="";
   }
   const n=r.tick_count||0;
-  $("#sascent").textContent=n+(n===1?" ascent":" ascents");
+  $("#sascent").textContent=n?n+(n===1?" ascent":" ascents"):"no ascents yet";
   const foot=$("#sfoot");
   foot.innerHTML="";
   if(r.setter_name){
