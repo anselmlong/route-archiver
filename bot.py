@@ -27,6 +27,7 @@ from telegram.ext import (
 from storage import GradeError, Storage, V_ORDER, WILD_LOW, _norm_wall, _V_IDX, parse_caption
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # Telegram API URLs embed the bot token; don't log them
 log = logging.getLogger("routes-bot")
 
 BASE_DIR = Path(__file__).parent
