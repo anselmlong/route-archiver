@@ -147,6 +147,11 @@
   /* ---- stat panels (mine / hot / setter) ------------------------------- */
   .mine-stats{margin:14px 0 2px}
   .mrow{font-size:13.5px;color:var(--text);margin-bottom:12px;line-height:1.5}
+  /* a profile reads name first, then its numbers one step quieter */
+  .mrow.head{display:flex;flex-direction:column;gap:2px;margin-bottom:14px}
+  .mrow .who{font-size:18px;font-weight:680;letter-spacing:-.02em;line-height:1.3;overflow-wrap:anywhere}
+  .mrow .statline,.mrow.note{color:var(--muted);font-variant-numeric:tabular-nums}
+  .mrow .statline b,.mrow.note b{color:var(--text);font-weight:650}
   .pyr{display:flex;align-items:center;gap:9px;margin-bottom:6px}
   .pg{width:36px;font-size:11.5px;color:var(--muted);text-align:right;flex-shrink:0;
     font-variant-numeric:tabular-nums}
@@ -159,15 +164,15 @@
   }
   .pc{width:22px;font-size:11.5px;color:var(--muted);text-align:right;flex-shrink:0;
     font-variant-numeric:tabular-nums}
-  .backbtn{display:inline-block;min-height:40px;margin-top:10px;background:var(--panel);border:1px solid var(--line);
+  .backbtn{display:inline-flex;align-items:center;min-height:40px;margin:0 0 14px;background:var(--panel);border:1px solid var(--line);
     color:var(--text);border-radius:var(--r);padding:8px 13px;font-size:13px;transition:border-color .12s}
   @media (hover:hover){.backbtn:hover{border-color:var(--line-2)}}
 
   /* ---- leaderboard ----------------------------------------------------- */
   .board{margin-top:10px}
-  .board h3{font-size:12px;margin:20px 0 9px;color:var(--faint);text-transform:uppercase;
+  .board h2{font-size:12px;margin:20px 0 9px;color:var(--faint);text-transform:uppercase;
     letter-spacing:.09em;font-weight:680}
-  .board h3:first-child{margin-top:4px}
+  .board h2:first-child{margin-top:4px}
   .brow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 13px;
     background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
     margin-bottom:7px;font-size:13.5px}
@@ -347,20 +352,28 @@
     animation-delay:calc(var(--i) * 45ms)}
   @keyframes starpop{0%{transform:scale(.7)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
   .card.flash{animation:cardflash 1.6s ease}
+  /* the route of the week is the card the Hot header is talking about: it
+     carries a warm edge, and its flame catches once as the tab opens */
+  .card.top{border-color:var(--accent-edge);
+    background:linear-gradient(100deg,var(--accent-tint),transparent 55%),var(--panel)}
+  .card.top .hotcount{display:inline-block;transform-origin:50% 85%;
+    animation:catch .9s cubic-bezier(.16,1,.3,1) .15s both}
+  @keyframes catch{0%{transform:scale(.6);opacity:.2}35%{transform:scale(1.22) rotate(-4deg);opacity:1}
+    60%{transform:scale(.94) rotate(2deg)}100%{transform:none}}
   @keyframes cardflash{0%{background:var(--panel-2)}100%{background:transparent}}
 
   @media (prefers-reduced-motion:reduce){
     .sheet,.sheet.open{transform:none;transition:opacity .2s ease,visibility 0s linear .2s;opacity:0}
     .sheet.open{opacity:1;transition:opacity .2s ease}
     .card:active,.tickbtn:active,.starselect button:active{transform:none}
-    .card.flash,.tickbtn.sent,.starselect button.pop{animation:none}
+    .card.flash,.tickbtn.sent,.starselect button.pop,.card.top .hotcount{animation:none}
   }
 </style>
 </head>
 <body>
 <header>
   <div class="brandrow">
-    <span class="brand">🧗&nbsp;USC Routes</span>
+    <h1 class="brand">🧗&nbsp;USC Routes</h1>
     <span class="count" id="count"></span>
   </div>
   <div class="sub" id="sub">tap a card for details</div>
@@ -586,6 +599,14 @@ function listLoading(){
   state.curList=[];
 }
 
+// a failed fetch on any view says what failed and offers the same retry
+// Browse has, instead of a dead end that only a tab switch gets out of
+function failNote(el,msg,again){
+  el.hidden=false;
+  el.innerHTML=esc(msg)+' <button type="button" class="elink">Retry</button>';
+  el.querySelector("button").onclick=again;
+}
+
 function setWallOptions(walls){
   // one tap per wall instead of a dropdown: there are only a handful
   const box=$("#wallchips");
@@ -799,6 +820,8 @@ function renderGrid(list){
   const grid=$("#grid"), empty=$("#empty");
   empty.hidden=!!list.length;
   grid.replaceChildren(...list.map(cardFor));
+  // set here rather than in renderHot, so a repaint after rating keeps it
+  if(state.view==="hot"&&list.length&&list[0].recent_ticks)grid.firstElementChild.classList.add("top");
 }
 
 // one card element per route, reused across repaints, so searching, sorting
@@ -820,7 +843,7 @@ function cardFor(r){
     cardCache.set(r.id,c);
   }
   c._r=r;
-  c.classList.remove("flash");
+  c.classList.remove("flash","top");
   fillCard(c,r);
   return c;
 }
@@ -907,13 +930,16 @@ async function loadMine(){
     const d=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
     if(!d||!Array.isArray(d.routes))throw new Error(d&&d.error||"no history");
     state.mine=d;
+    // a reply that lands after the user moved to another tab must not paint
+    // its list over that tab's
+    if(state.view!=="mine")return;
     setSub();
     renderMine();
   }catch(e){
+    if(state.view!=="mine")return;
     setSub();
     $("#grid").innerHTML="";
-    $("#empty").hidden=false;
-    $("#empty").textContent="Couldn't load your ticks. Try again shortly.";
+    failNote($("#empty"),"Couldn't load your ticks.",loadMine);
   }
 }
 
@@ -925,9 +951,9 @@ function renderMine(){
   const max=Math.max(1,...bars.map(b=>b[1]));
   const who=esc(m.name||"You");
   $("#mineStats").innerHTML=m.count
-    ?`<div class="mrow"><b>${who}</b> · <b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></div>`+
+    ?`<div class="mrow head"><span class="who">${who}</span><span class="statline"><b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></span></div>`+
       bars.map(([g,c],i)=>`<div class="pyr"><span class="pg">${esc(g)}</span><div class="pbar"><div style="width:${c/max*100}%;--i:${i}"></div></div><span class="pc">${c}</span></div>`).join("")
-    :`<div class="mrow"><b>${who}</b> · no sends logged yet</div>`;
+    :`<div class="mrow head"><span class="who">${who}</span><span class="statline">no sends logged yet</span></div>`;
   $("#count").textContent="";
   $("#empty").textContent="No ticks yet — open a route and mark it sent.";
   renderGrid(m.routes);
@@ -940,14 +966,17 @@ async function loadHot(){
   try{
     let q="/api/hot";
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
-    state.hot=await fetch(q).then(x=>x.json());
+    const h=await fetch(q).then(x=>x.json());
+    if(!h||!Array.isArray(h.routes))throw new Error("bad payload");
+    state.hot=h;
+    if(state.view!=="hot")return;
     setSub();
     renderHot();
   }catch(e){
+    if(state.view!=="hot")return;
     setSub();
     $("#grid").innerHTML="";
-    $("#empty").hidden=false;
-    $("#empty").textContent="Couldn't load this week's hot routes. Try again shortly.";
+    failNote($("#empty"),"Couldn't load this week's hot routes.",loadHot);
   }
 }
 
@@ -965,6 +994,7 @@ function renderHot(){
 }
 
 /* ---- setter profile (drill-down from a route's "set by" link) ---- */
+const BACK='<button class="backbtn" id="setterBack">← Back to Browse</button>';
 async function openSetter(setterId){
   if(!setterId)return;
   closeSheet();
@@ -981,16 +1011,26 @@ async function openSetter(setterId){
   $("#setterStats").innerHTML="";
   $("#sub").textContent="loading setter…";
   listLoading();
+  // only the latest profile asked for may paint, and only while it is on screen
+  const req=state.setterReq=setterId;
+  const current=()=>state.view==="setter"&&state.setterReq===req;
   try{
     let q="/api/setter/"+setterId;
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
     const d=await fetch(q).then(x=>x.json());
+    if(!current())return;
     state.setter=(d&&Array.isArray(d.routes))?d:null;
     setSub();
     renderSetter();
   }catch(e){
+    if(!current())return;
     setSub();
-    $("#setterStats").innerHTML='<div class="empty">Couldn\'t load this setter.</div>';
+    // clear the placeholder rows, or they pulse under the error for good
+    $("#grid").innerHTML="";
+    $("#count").textContent="";
+    $("#setterStats").innerHTML=BACK+'<div class="empty" id="setterErr"></div>';
+    $("#setterBack").onclick=()=>setView("browse");
+    failNote($("#setterErr"),"Couldn't load this setter.",()=>openSetter(setterId));
   }
 }
 
@@ -998,8 +1038,7 @@ function renderSetter(){
   const p=state.setter;
   if(!p){
     // the fetch came back without a profile -- setter not found
-    $("#setterStats").innerHTML='<div class="empty">Setter not found.</div>'+
-      '<button class="backbtn" id="setterBack">← Back to Browse</button>';
+    $("#setterStats").innerHTML=BACK+'<div class="empty">Setter not found.</div>';
     $("#setterBack").onclick=()=>setView("browse");
     $("#count").textContent="";
     $("#grid").innerHTML="";
@@ -1010,13 +1049,12 @@ function renderSetter(){
     ?`${fmtAvg(p.avg_rating_received)} ★ avg (${p.rating_count})`
     :"no ratings yet";
   const most=p.most_ticked_route
-    ?`<div class="mrow">Most sent: <b>${esc(p.most_ticked_route.name)}</b> (${p.most_ticked_route.tick_count})</div>`
+    ?`<div class="mrow note">Most sent: <b>${esc(p.most_ticked_route.name)}</b> (${p.most_ticked_route.tick_count})</div>`
     :"";
-  $("#setterStats").innerHTML=
-    `<div class="mrow"><b>${esc(p.setter_name||"Setter")}</b> · ${p.routes_set} route${p.routes_set===1?"":"s"} set `+
-    `(${p.active} active, ${p.retired} retired) · ${avg}</div>`+
-    most+
-    `<button class="backbtn" id="setterBack">← Back to Browse</button>`;
+  $("#setterStats").innerHTML=BACK+
+    `<div class="mrow head"><span class="who">${esc(p.setter_name||"Setter")}</span><span class="statline">${p.routes_set} route${p.routes_set===1?"":"s"} set `+
+    `(${p.active} active, ${p.retired} retired) · ${avg}</span></div>`+
+    most;
   $("#setterBack").onclick=()=>setView("browse");
   $("#count").textContent="";
   $("#empty").textContent="This setter has no routes.";
@@ -1026,10 +1064,14 @@ function renderSetter(){
 async function loadBoard(){
   if(!state.board)$("#board").innerHTML='<div class="skel row" aria-hidden="true"></div>'.repeat(5);
   try{
-    state.board=await fetch("/api/leaderboard").then(x=>x.json());
+    const b=await fetch("/api/leaderboard").then(x=>x.json());
+    if(!b||!Array.isArray(b.climbers)||!Array.isArray(b.setters))throw new Error("bad payload");
+    state.board=b;
     renderBoard();
   }catch(e){
-    $("#board").innerHTML='<div class="empty">Couldn\'t load the leaderboard.</div>';
+    if(state.board)return;  // keep the last good board rather than blanking it
+    $("#board").innerHTML='<div class="empty"></div>';
+    failNote($("#board .empty"),"Couldn't load the leaderboard.",loadBoard);
   }
 }
 
@@ -1048,7 +1090,7 @@ function renderBoard(){
     :'<div class="empty">No routes set yet.</div>';
   // the headings are uppercase micro-labels like the rest of the app's
   // section labels, so an emoji in front of them is just noise
-  $("#board").innerHTML=`<h3>Top climbers</h3>${climbers}<h3>Top setters</h3>${setters}`;
+  $("#board").innerHTML=`<h2>Top climbers</h2>${climbers}<h2>Top setters</h2>${setters}`;
 }
 
 /* ---- sheet buttons ---- */
