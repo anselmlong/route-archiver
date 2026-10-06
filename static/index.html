@@ -352,13 +352,21 @@
     animation-delay:calc(var(--i) * 45ms)}
   @keyframes starpop{0%{transform:scale(.7)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
   .card.flash{animation:cardflash 1.6s ease}
+  /* the route of the week is the card the Hot header is talking about: it
+     carries a warm edge, and its flame catches once as the tab opens */
+  .card.top{border-color:var(--accent-edge);
+    background:linear-gradient(100deg,var(--accent-tint),transparent 55%),var(--panel)}
+  .card.top .hotcount{display:inline-block;transform-origin:50% 85%;
+    animation:catch .9s cubic-bezier(.16,1,.3,1) .15s both}
+  @keyframes catch{0%{transform:scale(.6);opacity:.2}35%{transform:scale(1.22) rotate(-4deg);opacity:1}
+    60%{transform:scale(.94) rotate(2deg)}100%{transform:none}}
   @keyframes cardflash{0%{background:var(--panel-2)}100%{background:transparent}}
 
   @media (prefers-reduced-motion:reduce){
     .sheet,.sheet.open{transform:none;transition:opacity .2s ease,visibility 0s linear .2s;opacity:0}
     .sheet.open{opacity:1;transition:opacity .2s ease}
     .card:active,.tickbtn:active,.starselect button:active{transform:none}
-    .card.flash,.tickbtn.sent,.starselect button.pop{animation:none}
+    .card.flash,.tickbtn.sent,.starselect button.pop,.card.top .hotcount{animation:none}
   }
 </style>
 </head>
@@ -812,6 +820,8 @@ function renderGrid(list){
   const grid=$("#grid"), empty=$("#empty");
   empty.hidden=!!list.length;
   grid.replaceChildren(...list.map(cardFor));
+  // set here rather than in renderHot, so a repaint after rating keeps it
+  if(state.view==="hot"&&list.length&&list[0].recent_ticks)grid.firstElementChild.classList.add("top");
 }
 
 // one card element per route, reused across repaints, so searching, sorting
@@ -833,7 +843,7 @@ function cardFor(r){
     cardCache.set(r.id,c);
   }
   c._r=r;
-  c.classList.remove("flash");
+  c.classList.remove("flash","top");
   fillCard(c,r);
   return c;
 }
