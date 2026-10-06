@@ -147,6 +147,11 @@
   /* ---- stat panels (mine / hot / setter) ------------------------------- */
   .mine-stats{margin:14px 0 2px}
   .mrow{font-size:13.5px;color:var(--text);margin-bottom:12px;line-height:1.5}
+  /* a profile reads name first, then its numbers one step quieter */
+  .mrow.head{display:flex;flex-direction:column;gap:2px;margin-bottom:14px}
+  .mrow .who{font-size:18px;font-weight:680;letter-spacing:-.02em;line-height:1.3;overflow-wrap:anywhere}
+  .mrow .statline,.mrow.note{color:var(--muted);font-variant-numeric:tabular-nums}
+  .mrow .statline b,.mrow.note b{color:var(--text);font-weight:650}
   .pyr{display:flex;align-items:center;gap:9px;margin-bottom:6px}
   .pg{width:36px;font-size:11.5px;color:var(--muted);text-align:right;flex-shrink:0;
     font-variant-numeric:tabular-nums}
@@ -159,7 +164,7 @@
   }
   .pc{width:22px;font-size:11.5px;color:var(--muted);text-align:right;flex-shrink:0;
     font-variant-numeric:tabular-nums}
-  .backbtn{display:inline-block;min-height:40px;margin-top:10px;background:var(--panel);border:1px solid var(--line);
+  .backbtn{display:inline-flex;align-items:center;min-height:40px;margin:0 0 14px;background:var(--panel);border:1px solid var(--line);
     color:var(--text);border-radius:var(--r);padding:8px 13px;font-size:13px;transition:border-color .12s}
   @media (hover:hover){.backbtn:hover{border-color:var(--line-2)}}
 
@@ -936,9 +941,9 @@ function renderMine(){
   const max=Math.max(1,...bars.map(b=>b[1]));
   const who=esc(m.name||"You");
   $("#mineStats").innerHTML=m.count
-    ?`<div class="mrow"><b>${who}</b> · <b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></div>`+
+    ?`<div class="mrow head"><span class="who">${who}</span><span class="statline"><b>${m.count}</b> send${m.count===1?"":"s"} · hardest <b>${esc(m.hardest_grade||"—")}</b></span></div>`+
       bars.map(([g,c],i)=>`<div class="pyr"><span class="pg">${esc(g)}</span><div class="pbar"><div style="width:${c/max*100}%;--i:${i}"></div></div><span class="pc">${c}</span></div>`).join("")
-    :`<div class="mrow"><b>${who}</b> · no sends logged yet</div>`;
+    :`<div class="mrow head"><span class="who">${who}</span><span class="statline">no sends logged yet</span></div>`;
   $("#count").textContent="";
   $("#empty").textContent="No ticks yet — open a route and mark it sent.";
   renderGrid(m.routes);
@@ -1023,8 +1028,7 @@ function renderSetter(){
   const p=state.setter;
   if(!p){
     // the fetch came back without a profile -- setter not found
-    $("#setterStats").innerHTML='<div class="empty">Setter not found.</div>'+
-      '<button class="backbtn" id="setterBack">← Back to Browse</button>';
+    $("#setterStats").innerHTML=BACK+'<div class="empty">Setter not found.</div>';
     $("#setterBack").onclick=()=>setView("browse");
     $("#count").textContent="";
     $("#grid").innerHTML="";
@@ -1035,13 +1039,12 @@ function renderSetter(){
     ?`${fmtAvg(p.avg_rating_received)} ★ avg (${p.rating_count})`
     :"no ratings yet";
   const most=p.most_ticked_route
-    ?`<div class="mrow">Most sent: <b>${esc(p.most_ticked_route.name)}</b> (${p.most_ticked_route.tick_count})</div>`
+    ?`<div class="mrow note">Most sent: <b>${esc(p.most_ticked_route.name)}</b> (${p.most_ticked_route.tick_count})</div>`
     :"";
-  $("#setterStats").innerHTML=
-    `<div class="mrow"><b>${esc(p.setter_name||"Setter")}</b> · ${p.routes_set} route${p.routes_set===1?"":"s"} set `+
-    `(${p.active} active, ${p.retired} retired) · ${avg}</div>`+
-    most+
-    `<button class="backbtn" id="setterBack">← Back to Browse</button>`;
+  $("#setterStats").innerHTML=BACK+
+    `<div class="mrow head"><span class="who">${esc(p.setter_name||"Setter")}</span><span class="statline">${p.routes_set} route${p.routes_set===1?"":"s"} set `+
+    `(${p.active} active, ${p.retired} retired) · ${avg}</span></div>`+
+    most;
   $("#setterBack").onclick=()=>setView("browse");
   $("#count").textContent="";
   $("#empty").textContent="This setter has no routes.";
