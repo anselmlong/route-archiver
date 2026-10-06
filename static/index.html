@@ -165,9 +165,9 @@
 
   /* ---- leaderboard ----------------------------------------------------- */
   .board{margin-top:10px}
-  .board h3{font-size:12px;margin:20px 0 9px;color:var(--faint);text-transform:uppercase;
+  .board h2{font-size:12px;margin:20px 0 9px;color:var(--faint);text-transform:uppercase;
     letter-spacing:.09em;font-weight:680}
-  .board h3:first-child{margin-top:4px}
+  .board h2:first-child{margin-top:4px}
   .brow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 13px;
     background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
     margin-bottom:7px;font-size:13.5px}
@@ -360,7 +360,7 @@
 <body>
 <header>
   <div class="brandrow">
-    <span class="brand">🧗&nbsp;USC Routes</span>
+    <h1 class="brand">🧗&nbsp;USC Routes</h1>
     <span class="count" id="count"></span>
   </div>
   <div class="sub" id="sub">tap a card for details</div>
@@ -584,6 +584,14 @@ function listLoading(){
   $("#empty").hidden=true;
   $("#count").textContent="";
   state.curList=[];
+}
+
+// a failed fetch on any view says what failed and offers the same retry
+// Browse has, instead of a dead end that only a tab switch gets out of
+function failNote(el,msg,again){
+  el.hidden=false;
+  el.innerHTML=esc(msg)+' <button type="button" class="elink">Retry</button>';
+  el.querySelector("button").onclick=again;
 }
 
 function setWallOptions(walls){
@@ -907,13 +915,16 @@ async function loadMine(){
     const d=await fetch("/api/me?tg="+encodeURIComponent(state.initData)).then(x=>x.json());
     if(!d||!Array.isArray(d.routes))throw new Error(d&&d.error||"no history");
     state.mine=d;
+    // a reply that lands after the user moved to another tab must not paint
+    // its list over that tab's
+    if(state.view!=="mine")return;
     setSub();
     renderMine();
   }catch(e){
+    if(state.view!=="mine")return;
     setSub();
     $("#grid").innerHTML="";
-    $("#empty").hidden=false;
-    $("#empty").textContent="Couldn't load your ticks. Try again shortly.";
+    failNote($("#empty"),"Couldn't load your ticks.",loadMine);
   }
 }
 
@@ -940,14 +951,17 @@ async function loadHot(){
   try{
     let q="/api/hot";
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
-    state.hot=await fetch(q).then(x=>x.json());
+    const h=await fetch(q).then(x=>x.json());
+    if(!h||!Array.isArray(h.routes))throw new Error("bad payload");
+    state.hot=h;
+    if(state.view!=="hot")return;
     setSub();
     renderHot();
   }catch(e){
+    if(state.view!=="hot")return;
     setSub();
     $("#grid").innerHTML="";
-    $("#empty").hidden=false;
-    $("#empty").textContent="Couldn't load this week's hot routes. Try again shortly.";
+    failNote($("#empty"),"Couldn't load this week's hot routes.",loadHot);
   }
 }
 
@@ -965,6 +979,7 @@ function renderHot(){
 }
 
 /* ---- setter profile (drill-down from a route's "set by" link) ---- */
+const BACK='<button class="backbtn" id="setterBack">← Back to Browse</button>';
 async function openSetter(setterId){
   if(!setterId)return;
   closeSheet();
@@ -981,16 +996,26 @@ async function openSetter(setterId){
   $("#setterStats").innerHTML="";
   $("#sub").textContent="loading setter…";
   listLoading();
+  // only the latest profile asked for may paint, and only while it is on screen
+  const req=state.setterReq=setterId;
+  const current=()=>state.view==="setter"&&state.setterReq===req;
   try{
     let q="/api/setter/"+setterId;
     if(state.initData)q+="?tg="+encodeURIComponent(state.initData);
     const d=await fetch(q).then(x=>x.json());
+    if(!current())return;
     state.setter=(d&&Array.isArray(d.routes))?d:null;
     setSub();
     renderSetter();
   }catch(e){
+    if(!current())return;
     setSub();
-    $("#setterStats").innerHTML='<div class="empty">Couldn\'t load this setter.</div>';
+    // clear the placeholder rows, or they pulse under the error for good
+    $("#grid").innerHTML="";
+    $("#count").textContent="";
+    $("#setterStats").innerHTML=BACK+'<div class="empty" id="setterErr"></div>';
+    $("#setterBack").onclick=()=>setView("browse");
+    failNote($("#setterErr"),"Couldn't load this setter.",()=>openSetter(setterId));
   }
 }
 
@@ -1026,10 +1051,14 @@ function renderSetter(){
 async function loadBoard(){
   if(!state.board)$("#board").innerHTML='<div class="skel row" aria-hidden="true"></div>'.repeat(5);
   try{
-    state.board=await fetch("/api/leaderboard").then(x=>x.json());
+    const b=await fetch("/api/leaderboard").then(x=>x.json());
+    if(!b||!Array.isArray(b.climbers)||!Array.isArray(b.setters))throw new Error("bad payload");
+    state.board=b;
     renderBoard();
   }catch(e){
-    $("#board").innerHTML='<div class="empty">Couldn\'t load the leaderboard.</div>';
+    if(state.board)return;  // keep the last good board rather than blanking it
+    $("#board").innerHTML='<div class="empty"></div>';
+    failNote($("#board .empty"),"Couldn't load the leaderboard.",loadBoard);
   }
 }
 
@@ -1048,7 +1077,7 @@ function renderBoard(){
     :'<div class="empty">No routes set yet.</div>';
   // the headings are uppercase micro-labels like the rest of the app's
   // section labels, so an emoji in front of them is just noise
-  $("#board").innerHTML=`<h3>Top climbers</h3>${climbers}<h3>Top setters</h3>${setters}`;
+  $("#board").innerHTML=`<h2>Top climbers</h2>${climbers}<h2>Top setters</h2>${setters}`;
 }
 
 /* ---- sheet buttons ---- */
